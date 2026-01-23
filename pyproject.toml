@@ -1,0 +1,61 @@
+[project]
+name = "sense"
+version = "0.1.0"
+description = ""
+authors = [
+]
+
+
+requires-python = ">=3.10,<=3.13"
+dependencies = [
+    "fastapi[all] (>=0.119.0,<0.120.0)",
+    "opencv-python (>=4.12.0.88,<5.0.0.0)",
+    "pillow (>=11.3.0,<12.0.0)",
+    "uvicorn[standard] (>=0.37.0,<0.38.0)",
+    "openpyxl (>=3.1.5,<4.0.0)",
+    "sqlalchemy (>=2.0.44,<3.0.0)",
+    "alembic (>=1.17.0,<2.0.0)",
+    "python-dotenv (>=1.1.1,<2.0.0)",
+    "pandas (>=2.3.3,<3.0.0)",
+    "ffmpeg-python (>=0.2.0,<0.3.0)",
+    "imageio-ffmpeg (>=0.6.0,<0.7.0)",
+    "torchreid (>=0.2.5,<0.3.0)",
+    "tensorboard (>=2.20.0,<3.0.0)",
+    "torch (>=2.5.1,<3.0.0)",
+    "torchvision (>=0.20.1,<0.21.0)",
+    "torchaudio (>=2.5.1,<3.0.0)",
+]
+
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+
+[[tool.poetry.source]]
+name = "pytorch_cu121"
+url = "https://download.pytorch.org/whl/cu121"
+priority = "explicit"
+
+
+[tool.poetry.dependencies]
+torch = {source = "pytorch_cu121"}
+torchvision = {source = "pytorch_cu121"}
+torchaudio = {source = "pytorch_cu121"}
+[dependency-groups]
+dev = [
+    "pytest (>=8.4.2,<9.0.0)",
+    "pytest-cov (>=7.0.0,<8.0.0)",
+    "taskipy (>=1.14.1,<2.0.0)"
+]
+
+[tool.pytest.ini_options]
+pythonpath = "."
+
+[tool.taskipy.tasks]
+runback = 'uvicorn main:app --host 0.0.0.0 --port 8000 --reload'
+runfront = 'npm run dev --prefix frontend'

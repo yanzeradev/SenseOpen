@@ -1,0 +1,32 @@
+# hyp_generalization.yaml
+
+# Otimizador
+lr0: 0.01  # Taxa de aprendizado inicial (SGD)
+lrf: 0.01  # Taxa final (lr0 * lrf)
+momentum: 0.937
+weight_decay: 0.0005  # Evita overfitting
+warmup_epochs: 3.0    # Importante para estabilizar o início
+warmup_momentum: 0.8
+warmup_bias_lr: 0.1
+
+# Augmentations (Crucial para generalização)
+box: 7.5  # Peso da loss da caixa (aumentei um pouco para precisão em multidão)
+cls: 0.5  # Peso da loss da classe (só temos 1 classe, então pode ser baixo)
+dfl: 1.5  # Distribution Focal Loss (ajuda no refino da caixa)
+
+hsv_h: 0.015  # Variação de Matiz (Cor)
+hsv_s: 0.7    # Variação de Saturação - ALTA para lidar com ambientes diferentes
+hsv_v: 0.4    # Variação de Brilho - MÉDIA para lidar com luz/sombra
+
+degrees: 0.0      # Rotação (pessoas geralmente estão em pé, manter baixo ou zero)
+translate: 0.1    # Translação
+scale: 0.5        # Escala (pessoas longe vs perto)
+shear: 0.0
+perspective: 0.0
+flipud: 0.0       # Flip vertical (pessoas não andam de cabeça para baixo)
+fliplr: 0.5       # Flip horizontal (comum)
+
+# Mosaico e Mixup (Ótimos para datasets grandes)
+mosaic: 1.0       # Combina 4 imagens (ótimo para aprender objetos pequenos/distantes)
+mixup: 0.1        # Mistura imagens (ajuda a evitar memorização excessiva)
+copy_paste: 0.1   # Copia objetos e cola em outros lugares

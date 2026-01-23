@@ -1,0 +1,51 @@
+version: '3.9'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: sense_backend
+
+    environment:
+      - PYTHONPATH=/app/backend
+
+    # --- GPU SUPPORT (comente esse trecho se não tiver GPU NVIDIA) ---
+    deploy:
+      resources:
+       reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    command: poetry run uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./:/app
+    depends_on:
+      - go2rtc
+
+  go2rtc:
+    image: alexxit/go2rtc:latest
+    container_name: sense_go2rtc
+    ports:
+      - "1984:1984" # API e Stream HTTP
+      - "8554:8554" # RTSP Server
+    volumes:
+       - ./go2rtc.yaml:/config/go2rtc.yaml # Opcional se quiser persistir config
+    restart: unless-stopped
+
+  frontend:
+    image: node:20-alpine
+    container_name: sense_frontend
+    working_dir: /app/frontend
+    command: sh -c "npm install && npm run dev -- --host"
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app/frontend
+      - /app/frontend/node_modules
+
+# Volumes removidos pois SQLite salva no disco local mapeado em ./app

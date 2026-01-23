@@ -1,0 +1,19 @@
+/* frontend/src/components/VideoUpload.css */
+.video-processor { max-width: 900px; margin: 20px auto; padding: 20px; background-color: #242424; border-radius: 8px; color: white; }
+.input-group { text-align: center; margin: 40px 0; }
+.custom-file-upload { border: 1px solid #ccc; display: inline-block; padding: 10px 20px; cursor: pointer; background-color: #5e35b1; color: white; border-radius: 4px; font-weight: bold; }
+input[type="file"] { display: none; }
+.drawing-phase { text-align: center; }
+.drawing-buttons { display: flex; justify-content: center; gap: 10px; margin-bottom: 15px; flex-wrap: wrap; }
+.drawing-buttons button { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; transition: 0.2s; }
+.drawing-buttons button:hover { opacity: 0.9; }
+.drawing-container { position: relative; display: inline-block; border: 2px dashed #444; margin-top: 10px; }
+.drawing-container img { display: block; max-width: 100%; height: auto; max-height: 60vh; }
+.drawing-container canvas { position: absolute; top: 0; left: 0; cursor: crosshair; }
+.all-stats-container { display: flex; justify-content: space-around; flex-wrap: wrap; gap: 15px; margin-top: 20px; }
+.stats-output { background-color: #333; padding: 15px; border-radius: 8px; min-width: 200px; }
+.stats-output ul { list-style: none; padding: 0; margin: 0; }
+.stats-output li { padding: 5px 0; border-bottom: 1px solid #444; }
+.download-section { margin-top: 30px; display: flex; justify-content: center; gap: 15px; }
+.download-button { padding: 10px 20px; border-radius: 5px; background-color: #4CAF50; color: white; border: none; cursor: pointer; text-decoration: none; font-size: 14px; }
+.report-button { background-color: #008CBA; }

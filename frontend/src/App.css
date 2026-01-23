@@ -1,0 +1,261 @@
+/* src/App.css */
+
+/* --- Configuração Global e Centralização --- */
+body {
+  margin: 0;
+  display: flex;
+  place-items: center;
+  min-width: 320px;
+  min-height: 100vh;
+  background-color: #1a1a1a;
+  color: rgba(255, 255, 255, 0.87);
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+}
+
+#root {
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: center;
+}
+
+/* --- Estilos do Componente Principal --- */
+.video-processor {
+  border: 1px solid #555;
+  padding: 2rem;
+  border-radius: 8px;
+  background-color: #282c34;
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+h2, h3 {
+    color: #FFF;
+}
+
+/* --- Estilos Gerais --- */
+button {
+  padding: 0.6em 1.2em;
+  cursor: pointer;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: 1em;
+  font-weight: 500;
+  font-family: inherit;
+  background-color: #3f3f46;
+  color: #FFF;
+  transition: border-color 0.25s;
+}
+button:hover {
+  border-color: #646cff;
+}
+button:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+.error-message {
+  color: #ff6b6b;
+  margin-top: 1rem;
+}
+
+/* --- Seções do App --- */
+.input-group, .drawing-buttons, .video-output, .results-section {
+  margin-top: 1.5rem;
+}
+
+/* Seção de Desenho */
+.drawing-container {
+  position: relative;
+  display: inline-block;
+  margin-top: 10px;
+  line-height: 0;
+}
+.drawing-container img, .drawing-container canvas {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+.drawing-container canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  cursor: crosshair;
+}
+.drawing-buttons {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 15px;
+}
+
+.drawing-buttons .reset-button {
+  background-color: #d9534f;
+}
+.drawing-buttons .reset-button:hover {
+  background-color: #c9302c;
+}
+.drawing-buttons .invert-button {
+  background-color: #f0ad4e;
+}
+.drawing-buttons .invert-button:hover {
+  background-color: #ec971f;
+}
+
+/* Seção de Processamento */
+.stream-container {
+  position: relative;
+  display: inline-block;
+  margin-top: 10px;
+  background-color: #000;
+  max-width: 100%;
+}
+.progress-overlay {
+  position: absolute;
+  bottom: 10px;
+  left: 10px;
+  background-color: rgba(0, 0, 0, 0.7);
+  padding: 5px 10px;
+  border-radius: 5px;
+  font-size: 1.2em;
+  font-weight: bold;
+}
+
+/* Seção de Resultados */
+.all-stats-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  justify-content: center;
+  margin-bottom: 20px;
+}
+.stats-output {
+  flex: 1;
+  min-width: 250px;
+  padding: 15px;
+  border: 1px solid #444;
+  border-radius: 5px;
+  background-color: #333;
+  text-align: left;
+}
+.stats-output h3 {
+  margin-top: 0;
+  font-size: 1.1em;
+  text-align: center;
+  border-bottom: 1px solid #555;
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+}
+.stats-output ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.stats-output li {
+  margin-bottom: 5px;
+  display: flex;
+  justify-content: space-between;
+}
+.stats-output .total-count {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #555;
+  font-size: 1.1em;
+  font-weight: bold;
+}
+.download-section {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+    margin-top: 20px;
+}
+.download-button {
+  display: inline-block;
+  background-color: #5cb85c;
+  color: white;
+  text-decoration: none;
+}
+.download-button:hover {
+  background-color: #4cae4c;
+}
+.report-button {
+    background-color: #5bc0de;
+}
+.report-button:hover {
+    background-color: #31b0d5;
+}
+/* frontend/src/App.css */
+/* Estilos existentes... */
+
+.App-header {
+  background-color: #1f1f1f;
+  padding: 10px 40px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #333;
+}
+
+.App-header h1 {
+  margin: 0;
+  font-size: 1.8em;
+  color: #c792ea;
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.user-info span {
+  font-size: 1.1em;
+}
+
+.user-info button {
+  padding: 8px 15px;
+  background-color: #c62828;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.user-info button:hover {
+  background-color: #d32f2f;
+}
+
+.loading-app {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  font-size: 1.5rem;
+}
+
+.history-toggle-container {
+  display: flex;
+  justify-content: center;
+  margin-top: 40px;
+}
+
+.history-toggle-button {
+  padding: 10px 25px;
+  font-size: 1em;
+  font-weight: bold;
+  cursor: pointer;
+  border-radius: 20px;
+  border: 1px solid #555;
+  background-color: #333;
+  color: #eee;
+  transition: all 0.2s;
+}
+
+.history-toggle-button:hover {
+  background-color: #444;
+  border-color: #777;
+}

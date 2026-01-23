@@ -1,0 +1,14 @@
+.env
+__pycache__/
+*.log
+*.dll
+*.exe
+dist/
+node_modules/
+static/output_videos/*
+static/uploaded_videos/*
+!static/.gitkeep
+poetry.lock
+sense.db
+frontend/package-lock.json
+backend/sense/static
