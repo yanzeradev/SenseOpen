@@ -43,7 +43,7 @@ Execute os seguintes comandos abaixo:
 
 `cd SenseOpen`
 
-`wget https://github.com/yanzeradev/SenseOpen/releases/download/modelo/model_coco_crowd.pt -UseBasicParsing -OutFile backend/sense/model_coco_crowd.pt`
+`wget https://github.com/yanzeradev/SenseOpen/releases/download/model/model_coco_crowd.pt -UseBasicParsing -OutFile backend/sense/model_coco_crowd.pt`
 
 
 
