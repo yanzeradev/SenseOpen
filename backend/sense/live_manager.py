@@ -91,6 +91,10 @@ async def run_live_camera(device_id, rtsp_url, lines_config, stop_event, process
         crud.create_user_video(db, 0, video_id, rtsp_url, "")
         # Força atualização imediata para o frontend não pegar JSON null
         crud.update_video_after_processing(db, video_id, None, None, initial_stats, "live_processing")
+        # Força TCP para evitar corrupção de H.265 (Erro PPS/ref frames)
+        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+        
+        cap = cv2.VideoCapture(local_rtsp)
 
         cap = cv2.VideoCapture(local_rtsp)
         
