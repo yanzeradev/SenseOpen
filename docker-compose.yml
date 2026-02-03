@@ -9,6 +9,7 @@ services:
 
     environment:
       - PYTHONPATH=/app/backend
+      - TZ=America/Sao_Paulo
 
     # --- GPU SUPPORT (comente esse trecho se não tiver GPU NVIDIA) ---
     deploy:
@@ -33,6 +34,8 @@ services:
     ports:
       - "1984:1984" # API e Stream HTTP
       - "8554:8554" # RTSP Server
+    environment:
+      - TZ=America/Sao_Paulo
     volumes:
        - ./go2rtc.yaml:/config/go2rtc.yaml # Opcional se quiser persistir config
     restart: unless-stopped

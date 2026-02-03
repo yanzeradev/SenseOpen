@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import api, { getDeviceSnapshot, updateDeviceAdvanced } from '../services/api';
+import api, { getDeviceSnapshot, updateDeviceAdvanced, configureDevice, getDeviceLiveStats } from '../services/api';
 import './DeviceList.css';
 
 const API_BASE = 'http://localhost:8000';
@@ -86,6 +86,41 @@ const DeviceList = () => {
     const [activeLine, setActiveLine] = useState('entrant');
     const [inSide, setInSide] = useState('right');
     const [schedule, setSchedule] = useState({ start: "08:00", end: "18:00" });
+    // ESTADO PARA MONITORAMENTO (STATS)
+    const [statsDevice, setStatsDevice] = useState(null);
+    const [liveStats, setLiveStats] = useState(null);
+    const statsIntervalRef = useRef(null);
+
+    const handleOpenStats = (device) => {
+        setStatsDevice(device);
+        setLiveStats(null); // Limpa dados antigos
+        fetchStats(device.id); // Busca imediatamente
+        
+        // Inicia Polling a cada 2 segundos
+        if (statsIntervalRef.current) clearInterval(statsIntervalRef.current);
+        statsIntervalRef.current = setInterval(() => fetchStats(device.id), 2000);
+    };
+
+    const handleCloseStats = () => {
+        setStatsDevice(null);
+        if (statsIntervalRef.current) clearInterval(statsIntervalRef.current);
+    };
+
+    const fetchStats = async (id) => {
+        try {
+            const data = await getDeviceLiveStats(id);
+            setLiveStats(data);
+        } catch (error) {
+            console.error("Erro ao buscar stats", error);
+        }
+    };
+    
+    // Limpa intervalo ao desmontar componente
+    useEffect(() => {
+        return () => {
+            if (statsIntervalRef.current) clearInterval(statsIntervalRef.current);
+        };
+    }, []);
 
     // Função para abrir o modal de configuração
     const handleOpenConfig = async (device) => {
@@ -254,7 +289,21 @@ const DeviceList = () => {
                             <p>{dev.manufacturer} (RTSP)</p>
                             <div className="card-actions">
                                 <button className="btn-view" onClick={() => handleViewStream(dev)}>👁️ Visualizar</button>
-                                <button className="btn-config" onClick={() => handleOpenConfig(dev)} style={{marginLeft: '5px', background: '#e0a800'}}>⚙️ Config</button>
+                                {/* Botão MONITORAR (Azul) */}
+                                <button 
+                                    onClick={() => handleOpenStats(dev)}
+                                    style={{marginLeft: '5px', background: '#17a2b8', border:'none', padding:'5px 10px', borderRadius:'4px', cursor:'pointer', color:'#fff'}}
+                                >
+                                    📊 Monitorar
+                                </button>
+
+                                <button 
+                                    className="btn-config" 
+                                    onClick={() => handleOpenConfig(dev)} 
+                                    style={{marginLeft: '5px', background: '#e0a800', border:'none', padding:'5px 10px', borderRadius:'4px', cursor:'pointer', color:'#fff'}}
+                                >
+                                    ⚙️ Config
+                                </button>
                                 <button className="btn-delete" onClick={() => handleDelete(dev.id)}>Remover</button>
                             </div>
                         </div>
@@ -376,6 +425,53 @@ const DeviceList = () => {
                                 </div>
                             </div>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL DE MONITORAMENTO (STATS) */}
+            {statsDevice && (
+                <div className="modal-overlay">
+                    <div className="modal-content" style={{textAlign: 'center', minWidth: '400px'}}>
+                        <h3>Monitoramento: {statsDevice.name}</h3>
+                        <p style={{color: '#aaa', fontSize: '0.9em'}}>Atualização em tempo real (a cada 2s)</p>
+                        
+                        <div className="stats-box" style={{marginTop: '20px', display: 'flex', justifyContent: 'center', gap: '30px'}}>
+                            {liveStats ? (
+                                <>
+                                    {liveStats.status === 'online' ? (
+                                        <>
+                                            <div style={{background: '#28a745', padding: '20px', borderRadius: '10px', minWidth: '120px'}}>
+                                                <h1 style={{fontSize: '3em', margin: 0}}>{liveStats.data?.entrantes?.Total || 0}</h1>
+                                                <span>Entrantes</span>
+                                            </div>
+                                            <div style={{background: '#ffc107', padding: '20px', borderRadius: '10px', minWidth: '120px', color: '#000'}}>
+                                                <h1 style={{fontSize: '3em', margin: 0}}>{liveStats.data?.passantes?.Total || 0}</h1>
+                                                <span>Passantes</span>
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <div style={{padding: '20px', background: '#555', borderRadius: '8px', width: '100%'}}>
+                                            <h4>Processamento Parado ou Offline</h4>
+                                            <p>Aguardando horário agendado ou conexão.</p>
+                                        </div>
+                                    )}
+                                </>
+                            ) : (
+                                <p>Carregando dados...</p>
+                            )}
+                        </div>
+
+                        {liveStats && liveStats.status === 'online' && (
+                            <div style={{marginTop: '20px', padding: '10px', background: '#333', borderRadius: '5px'}}>
+                                <p><strong>Última atualização do servidor:</strong> {liveStats.server_time}</p>
+                                <p style={{fontSize: '0.8em', color: '#ccc'}}>Total Geral: {liveStats.data?.total_geral?.Total || 0}</p>
+                            </div>
+                        )}
+
+                        <button onClick={handleCloseStats} style={{marginTop: '20px', padding: '10px 30px', background: '#666', border: 'none', color: '#fff', borderRadius: '5px', cursor: 'pointer'}}>
+                            Fechar
+                        </button>
                     </div>
                 </div>
             )}

@@ -3,6 +3,7 @@ FROM python:3.11-slim
 
 # Instala dependências do sistema
 RUN apt-get update && apt-get install -y \
+    tzdata \
     libgl1 \
     libglib2.0-0 \
     ffmpeg \

@@ -60,4 +60,10 @@ export const updateDeviceAdvanced = async (deviceId, fullConfigData) => {
   return response.data;
 };
 
+// Busca estatísticas em tempo real
+export const getDeviceLiveStats = async (deviceId) => {
+  const response = await api.get(`/devices/${deviceId}/live_stats`);
+  return response.data;
+};
+
 export default api;

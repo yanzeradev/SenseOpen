@@ -630,6 +630,38 @@ def get_device_snapshot(device_id: int, db: Session = Depends(get_db)):
 
     return {"url": f"/static/frames/{filename}"}
 
+@app.get("/devices/{device_id}/live_stats")
+def get_device_live_stats(device_id: int, db: Session = Depends(get_db)):
+    try:
+        prefix = f"live_{device_id}_"
+        latest_video = db.query(models.Video)\
+            .filter(models.Video.id.like(f"{prefix}%"))\
+            .order_by(models.Video.created_at.desc())\
+            .first()
+
+        if not latest_video:
+            return {"status": "offline", "message": "Aguardando inicio..."}
+
+        # Garante que data não seja None
+        data = latest_video.results if latest_video.results else {}
+
+        if latest_video.status != "live_processing":
+            return {
+                "status": "stopped", 
+                "data": data,
+                "last_update": str(latest_video.created_at)
+            }
+
+        return {
+            "status": "online",
+            "data": data,
+            "server_time": datetime.now().strftime("%H:%M:%S")
+        }
+    except Exception as e:
+        print(f"Erro em live_stats: {e}")
+        # Retorna erro tratado 500 mas com JSON para não quebrar o frontend
+        return {"status": "error", "message": str(e)}
+
 @app.get("/stream-camera/{device_id}")
 def stream_camera_feed(device_id: int, db: Session = Depends(get_db)):
     """
