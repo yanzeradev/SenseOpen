@@ -4,30 +4,31 @@ import './DeviceList.css';
 
 const API_BASE = 'http://localhost:8000';
 
+// --- COMPONENTE AUXILIAR DE DESENHO CORRIGIDO ---
 const DrawingCanvas = ({ imageUrl, entrantPoints, setEntrantPoints, passerbyPoints, setPasserbyPoints, activeLine, inSide }) => {
     const canvasRef = useRef(null);
     const containerRef = useRef(null);
+    const [scale, setScale] = useState({ x: 1, y: 1 });
     
     const drawLine = (ctx, points, color, label) => {
         if (points.length === 0) return;
-        ctx.strokeStyle = color; ctx.lineWidth = 3; ctx.fillStyle = color;
+        ctx.strokeStyle = color; ctx.lineWidth = 5; ctx.fillStyle = color; // Linha mais grossa para ver melhor
         ctx.beginPath();
-        points.forEach((p, i) => { i===0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y); ctx.fillRect(p.x-3, p.y-3, 6, 6); });
+        points.forEach((p, i) => { i===0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y); ctx.fillRect(p.x-5, p.y-5, 10, 10); });
         ctx.stroke();
 
         if (points.length >= 2) {
             const mid = Math.floor(points.length/2);
             const p1 = points[mid-1]||points[0]; const p2 = points[mid];
             const mx = (p1.x+p2.x)/2; const my = (p1.y+p2.y)/2;
-            ctx.font = 'bold 16px Arial'; ctx.fillStyle = 'white';
+            ctx.font = 'bold 24px Arial'; ctx.fillStyle = 'white'; // Fonte maior
             ctx.fillText(label, mx+10, my-10);
             if (label === "Entrantes") {
                 const dx = p2.x-p1.x; const dy = p2.y-p1.y;
-                // Vetor normal
                 const norm = {x: -dy, y: dx}; const len = Math.sqrt(norm.x**2+norm.y**2)||1;
                 const un = {x: norm.x/len, y: norm.y/len};
-                const t1 = {x: mx+un.x*30, y: my+un.y*30}; 
-                const t2 = {x: mx-un.x*30, y: my-un.y*30};
+                const t1 = {x: mx+un.x*40, y: my+un.y*40}; 
+                const t2 = {x: mx-un.x*40, y: my-un.y*40};
                 ctx.fillText(inSide==='right'?"IN":"OUT", t1.x, t1.y);
                 ctx.fillText(inSide==='right'?"OUT":"IN", t2.x, t2.y);
             }
@@ -38,27 +39,48 @@ const DrawingCanvas = ({ imageUrl, entrantPoints, setEntrantPoints, passerbyPoin
         const cvs = canvasRef.current; if(!cvs) return;
         const ctx = cvs.getContext('2d');
         const img = containerRef.current.querySelector('img');
-        if(img && img.complete) {
-            cvs.width = img.width; cvs.height = img.height;
+        
+        const render = () => {
+            // AJUSTE: Usa resolução nativa da imagem (ex: 1920x1080)
+            cvs.width = img.naturalWidth || img.width; 
+            cvs.height = img.naturalHeight || img.height;
+            
             ctx.clearRect(0,0,cvs.width,cvs.height);
             drawLine(ctx, entrantPoints, '#00ff00', "Entrantes");
             drawLine(ctx, passerbyPoints, '#ffff00', "Passantes");
+        };
+
+        if(img && img.complete) {
+            render();
+        } else if (img) {
+            img.onload = render;
         }
     }, [entrantPoints, passerbyPoints, activeLine, imageUrl, inSide]);
 
     const handleClick = (e) => {
-        const rect = canvasRef.current.getBoundingClientRect();
-        const pt = {x: e.clientX-rect.left, y: e.clientY-rect.top};
+        const cvs = canvasRef.current;
+        const rect = cvs.getBoundingClientRect();
+        
+        // CÁLCULO DE ESCALA: Transforma pixel da tela em pixel da imagem original
+        const scaleX = cvs.width / rect.width;
+        const scaleY = cvs.height / rect.height;
+        
+        const pt = {
+            x: (e.clientX - rect.left) * scaleX,
+            y: (e.clientY - rect.top) * scaleY
+        };
+        
         activeLine === 'entrant' ? setEntrantPoints([...entrantPoints, pt]) : setPasserbyPoints([...passerbyPoints, pt]);
     };
 
     return (
-        <div ref={containerRef} className="drawing-container">
-            <img src={imageUrl} alt="Snapshot" onLoad={() => {
-                const cvs = canvasRef.current;
-                if(cvs) cvs.width = cvs.width; // Hack para redraw
-            }}/>
-            <canvas ref={canvasRef} onClick={handleClick} />
+        <div ref={containerRef} className="drawing-container" style={{position: 'relative', display: 'inline-block', width: '100%'}}>
+            <img src={imageUrl} alt="Snapshot" style={{width: '100%', display: 'block'}} />
+            <canvas 
+                ref={canvasRef} 
+                onClick={handleClick} 
+                style={{position: 'absolute', top: 0, left: 0, cursor: 'crosshair', width: '100%', height: '100%'}}
+            />
         </div>
     );
 };
