@@ -308,6 +308,32 @@ async def run_video_processing(video_id: str, line_ent_raw: list, line_pass_raw:
     crud.update_video_after_processing(db, video_id, out_path, report_url, final_counts, "done")
     await manager.send_final_results(client_id, {"counts": final_counts, "report_url": report_url})
 
+@app.get("/devices/{device_id}/monitor_stream")
+async def monitor_stream(device_id: int):
+    """
+    Stream MJPEG em tempo real do processamento da IA (Visual).
+    """
+    # Verifica se o dispositivo tem uma fila ativa no live_manager
+    if device_id not in live_manager.monitor_queues:
+        # Se não estiver rodando (fora do horário?), retorna erro ou imagem estática
+        return Response(status_code=404, content="Monitoramento inativo ou câmera desligada.")
+
+    async def frame_generator():
+        q = live_manager.monitor_queues[device_id]
+        while True:
+            try:
+                # Aguarda novo frame processado (timeout para não travar conexões mortas)
+                frame_bytes = await asyncio.wait_for(q.get(), timeout=5.0)
+                
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+            except asyncio.TimeoutError:
+                break
+            except Exception as e:
+                print(f"Erro stream monitoring: {e}")
+                break
+
+    return StreamingResponse(frame_generator(), media_type="multipart/x-mixed-replace; boundary=frame")
     
 @app.post("/upload-video/")
 async def upload_video(video_file: UploadFile = File(...), db: Session = Depends(get_db)):

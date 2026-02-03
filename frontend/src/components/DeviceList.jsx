@@ -429,49 +429,48 @@ const DeviceList = () => {
                 </div>
             )}
 
-            {/* MODAL DE MONITORAMENTO (STATS) */}
+            {/* MODAL DE MONITORAMENTO (STATS + VISUAL) */}
             {statsDevice && (
                 <div className="modal-overlay">
-                    <div className="modal-content" style={{textAlign: 'center', minWidth: '400px'}}>
-                        <h3>Monitoramento: {statsDevice.name}</h3>
-                        <p style={{color: '#aaa', fontSize: '0.9em'}}>Atualização em tempo real (a cada 2s)</p>
+                    <div className="modal-content" style={{textAlign: 'center', minWidth: '800px', maxWidth: '95%'}}>
+                        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px'}}>
+                             <h3>Monitoramento IA: {statsDevice.name}</h3>
+                             <button onClick={handleCloseStats} style={{background:'red', color:'white', border:'none', padding:'5px 10px', cursor:'pointer'}}>X</button>
+                        </div>
                         
-                        <div className="stats-box" style={{marginTop: '20px', display: 'flex', justifyContent: 'center', gap: '30px'}}>
+                        {/* ÁREA DO VIDEO PROCESSADO */}
+                        <div className="monitor-video-container" style={{background: '#000', minHeight: '400px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '20px', border: '2px solid #333'}}>
+                            {liveStats && liveStats.status === 'online' ? (
+                                <img 
+                                    src={`${API_BASE}/devices/${statsDevice.id}/monitor_stream`} 
+                                    alt="Processamento em Tempo Real"
+                                    style={{maxWidth: '100%', maxHeight: '60vh', display: 'block'}} 
+                                />
+                            ) : (
+                                <div style={{color: '#aaa'}}>
+                                    <p>Aguardando conexão ou fora do horário de agendamento...</p>
+                                    <p style={{fontSize:'0.8em'}}>{liveStats?.status || 'Carregando...'}</p>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* ESTATÍSTICAS ABAIXO DO VÍDEO */}
+                        <div className="stats-box" style={{display: 'flex', justifyContent: 'center', gap: '30px'}}>
                             {liveStats ? (
                                 <>
-                                    {liveStats.status === 'online' ? (
-                                        <>
-                                            <div style={{background: '#28a745', padding: '20px', borderRadius: '10px', minWidth: '120px'}}>
-                                                <h1 style={{fontSize: '3em', margin: 0}}>{liveStats.data?.entrantes?.Total || 0}</h1>
-                                                <span>Entrantes</span>
-                                            </div>
-                                            <div style={{background: '#ffc107', padding: '20px', borderRadius: '10px', minWidth: '120px', color: '#000'}}>
-                                                <h1 style={{fontSize: '3em', margin: 0}}>{liveStats.data?.passantes?.Total || 0}</h1>
-                                                <span>Passantes</span>
-                                            </div>
-                                        </>
-                                    ) : (
-                                        <div style={{padding: '20px', background: '#555', borderRadius: '8px', width: '100%'}}>
-                                            <h4>Processamento Parado ou Offline</h4>
-                                            <p>Aguardando horário agendado ou conexão.</p>
-                                        </div>
-                                    )}
+                                    <div style={{background: '#28a745', padding: '15px', borderRadius: '10px', minWidth: '120px'}}>
+                                        <h2 style={{fontSize: '2.5em', margin: 0, color: 'white'}}>{liveStats.data?.entrantes?.Total || 0}</h2>
+                                        <span style={{color: 'white'}}>Entrantes</span>
+                                    </div>
+                                    <div style={{background: '#ffc107', padding: '15px', borderRadius: '10px', minWidth: '120px'}}>
+                                        <h2 style={{fontSize: '2.5em', margin: 0, color: '#000'}}>{liveStats.data?.passantes?.Total || 0}</h2>
+                                        <span style={{color: '#000'}}>Passantes</span>
+                                    </div>
                                 </>
                             ) : (
                                 <p>Carregando dados...</p>
                             )}
                         </div>
-
-                        {liveStats && liveStats.status === 'online' && (
-                            <div style={{marginTop: '20px', padding: '10px', background: '#333', borderRadius: '5px'}}>
-                                <p><strong>Última atualização do servidor:</strong> {liveStats.server_time}</p>
-                                <p style={{fontSize: '0.8em', color: '#ccc'}}>Total Geral: {liveStats.data?.total_geral?.Total || 0}</p>
-                            </div>
-                        )}
-
-                        <button onClick={handleCloseStats} style={{marginTop: '20px', padding: '10px 30px', background: '#666', border: 'none', color: '#fff', borderRadius: '5px', cursor: 'pointer'}}>
-                            Fechar
-                        </button>
                     </div>
                 </div>
             )}
