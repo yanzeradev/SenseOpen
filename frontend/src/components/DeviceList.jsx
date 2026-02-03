@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import api from '../services/api';
+import api, { getDeviceSnapshot, updateDeviceAdvanced } from '../services/api';
 import './DeviceList.css';
 
 const API_BASE = 'http://localhost:8000';
@@ -55,12 +55,8 @@ const DrawingCanvas = ({ imageUrl, entrantPoints, setEntrantPoints, passerbyPoin
     return (
         <div ref={containerRef} className="drawing-container">
             <img src={imageUrl} alt="Snapshot" onLoad={() => {
-                // Força redraw
                 const cvs = canvasRef.current;
-                if(cvs) {
-                     // Pequeno hack para garantir que o canvas tenha o tamanho da imagem carregada
-                     cvs.width = cvs.width; 
-                }
+                if(cvs) cvs.width = cvs.width; // Hack para redraw
             }}/>
             <canvas ref={canvasRef} onClick={handleClick} />
         </div>
@@ -82,8 +78,8 @@ const DeviceList = () => {
     const [streamUrl, setStreamUrl] = useState(null);
     const videoRef = useRef(null); // Referência direta ao elemento de vídeo
 
-    // ESTADOS PARA CONFIGURAÇÃO AVANÇADA
-    const [configDevice, setConfigDevice] = useState(null); // Dispositivo sendo configurado
+ // ESTADOS PARA CONFIGURAÇÃO AVANÇADA
+    const [configDevice, setConfigDevice] = useState(null); 
     const [snapshotUrl, setSnapshotUrl] = useState(null);
     const [entrantPoints, setEntrantPoints] = useState([]);
     const [passerbyPoints, setPasserbyPoints] = useState([]);
@@ -100,7 +96,7 @@ const DeviceList = () => {
             
             // 2. Carrega configurações existentes se houver
             if (device.lines_config) {
-                const cfg = device.lines_config; // O backend já retorna como dict se for JSON
+                const cfg = device.lines_config; 
                 setEntrantPoints(cfg.entrant || []);
                 setPasserbyPoints(cfg.passerby || []);
                 setInSide(cfg.in_side || 'right');
@@ -133,12 +129,10 @@ const DeviceList = () => {
         };
 
         const payload = {
-            // Precisamos reenviar os dados obrigatórios
             name: configDevice.name,
             username: configDevice.username,
             password: configDevice.password,
             manufacturer: configDevice.manufacturer,
-            // Novos dados
             processing_start_time: schedule.start,
             processing_end_time: schedule.end,
             lines_config: linesConfig
@@ -148,7 +142,7 @@ const DeviceList = () => {
             await updateDeviceAdvanced(configDevice.id, payload);
             alert("Configuração salva com sucesso!");
             setConfigDevice(null);
-            loadSavedDevices(); // Recarrega para atualizar o estado local
+            loadSavedDevices(); 
         } catch (error) {
             console.error(error);
             alert("Erro ao salvar configuração.");
@@ -260,6 +254,7 @@ const DeviceList = () => {
                             <p>{dev.manufacturer} (RTSP)</p>
                             <div className="card-actions">
                                 <button className="btn-view" onClick={() => handleViewStream(dev)}>👁️ Visualizar</button>
+                                <button className="btn-config" onClick={() => handleOpenConfig(dev)} style={{marginLeft: '5px', background: '#e0a800'}}>⚙️ Config</button>
                                 <button className="btn-delete" onClick={() => handleDelete(dev.id)}>Remover</button>
                             </div>
                         </div>

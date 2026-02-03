@@ -54,20 +54,33 @@ def get_user_devices(db: Session, user_id: int):
 def update_device_config(db: Session, device_id: int, config: schemas.DeviceUpdate, rtsp_url: str):
     dev = db.query(models.Device).filter(models.Device.id == device_id).first()
     if dev:
-        dev.name = config.name
-        dev.username = config.username
-        dev.password = config.password
-        dev.manufacturer = config.manufacturer
+        # Atualiza campos básicos apenas se fornecidos
+        if config.name is not None:
+            dev.name = config.name
+        if config.username is not None:
+            dev.username = config.username
+        if config.password is not None:
+            dev.password = config.password
+        if config.manufacturer is not None:
+            dev.manufacturer = config.manufacturer
+            
+        # Atualiza configurações de processamento se fornecidas
         if config.processing_start_time is not None:
             dev.processing_start_time = config.processing_start_time
         if config.processing_end_time is not None:
             dev.processing_end_time = config.processing_end_time
         if config.lines_config is not None:
             dev.lines_config = config.lines_config
-        dev.rtsp_url = rtsp_url
+            
+        # RTSP URL sempre é recalculada/atualizada pelo endpoint chamador se necessário,
+        # mas aqui mantemos a lógica original de atualizar se passado
+        if rtsp_url:
+            dev.rtsp_url = rtsp_url
+            
         dev.is_configured = True
         if not dev.client_id:
-            dev.client_id = f"client{dev.owner_id}_{dev.id}"
+            dev.client_id = f"client{dev.id}" # Simplificado ID
+            
         db.commit()
         db.refresh(dev)
     return dev

@@ -36,11 +36,13 @@ class DeviceReport(DeviceBase):
     pass
 
 class DeviceUpdate(BaseModel):
-    """Usado pelo Frontend para configurar o fabricante e credenciais"""
-    name: str
-    username: str
-    password: str
-    manufacturer: str
+    """Usado pelo Frontend para configurar o fabricante, credenciais e IA"""
+    name: Optional[str] = None
+    username: Optional[str] = None
+    password: Optional[str] = None
+    manufacturer: Optional[str] = None
+    
+    # Configuração avançada
     processing_start_time: Optional[str] = None
     processing_end_time: Optional[str] = None
     lines_config: Optional[dict] = None

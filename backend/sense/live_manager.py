@@ -77,7 +77,6 @@ async def run_live_camera(device_id, rtsp_url, lines_config, stop_event, process
         video_id = f"live_{device_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
         # Cria entrada no histórico (reaproveitando tabela Video)
-        # Salva um placeholder no original_path pois é stream
         crud.create_user_video(db, 0, video_id, rtsp_url, "") 
         crud.update_video_status(db, video_id, "live_processing")
 
@@ -129,4 +128,51 @@ async def run_live_camera(device_id, rtsp_url, lines_config, stop_event, process
                 if tid not in track_states:
                     track_states[tid] = {'status': 'neutral', 'last_ent_side': 'unknown', 'last_pass_side': 'unknown'}
 
-                state = track_states
+                state = track_states[tid]
+
+                # 1. Checa Passante
+                curr_pass = geometry.get_point_side(ref_point, line_pass)
+                if curr_pass != 'on_line' and state['last_pass_side'] != 'unknown' and state['last_pass_side'] != curr_pass:
+                    if state['status'] == 'neutral':
+                        state['status'] = 'passerby'
+                        counts['passantes']['Person'] += 1
+                        counts['passantes']['Total'] += 1
+                state['last_pass_side'] = curr_pass
+
+                # 2. Checa Entrante
+                curr_ent = geometry.get_point_side(ref_point, line_ent)
+                entrant_out = 'left' if in_side == 'right' else 'right'
+                
+                if curr_ent != 'on_line' and state['last_ent_side'] == entrant_out and curr_ent == in_side:
+                    if state['status'] == 'neutral':
+                        state['status'] = 'entrant'
+                        counts['entrantes']['Person'] += 1
+                        counts['entrantes']['Total'] += 1
+                    elif state['status'] == 'passerby':
+                        state['status'] = 'entrant'
+                        counts['passantes']['Person'] -= 1 # Converte passante em entrante
+                        counts['passantes']['Total'] -= 1
+                        counts['entrantes']['Person'] += 1
+                        counts['entrantes']['Total'] += 1
+                state['last_ent_side'] = curr_ent
+
+            # Salva resultados parciais no banco a cada 10s
+            if time.time() - last_save > 10:
+                total_geral = {"Total": counts['entrantes']['Total'] + counts['passantes']['Total']}
+                final_res = {"total_geral": total_geral, "entrantes": counts['entrantes'], "passantes": counts['passantes']}
+                
+                crud.update_video_after_processing(db, video_id, None, None, final_res, "live_processing")
+                last_save = time.time()
+            
+            await asyncio.sleep(0.01) # Yield para event loop
+
+        cap.release()
+        
+        # Finaliza registro
+        crud.update_video_status(db, video_id, "done")
+        print(f"✅ Processamento finalizado: {device_id}")
+
+    except Exception as e:
+        print(f"❌ Erro fatal na thread da câmera {device_id}: {traceback.format_exc()}")
+    finally:
+        db.close()

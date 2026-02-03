@@ -581,27 +581,53 @@ def update_device_configuration(device_id: int, config_data: schemas.DeviceUpdat
 @app.get("/devices/{device_id}/snapshot")
 def get_device_snapshot(device_id: int, db: Session = Depends(get_db)):
     """
-    Captura 1 frame da câmera para auxiliar no desenho das linhas no Frontend.
+    Captura 1 frame solicitando diretamente ao Go2RTC (que lida bem com H.265).
     """
     dev = db.query(models.Device).filter(models.Device.id == device_id).first()
     if not dev:
         raise HTTPException(status_code=404, detail="Dispositivo não encontrado")
     
-    cap = cv2.VideoCapture(dev.rtsp_url)
-    if not cap.isOpened():
-        raise HTTPException(status_code=500, detail="Não foi possível conectar na câmera")
-        
-    ret, frame = cap.read()
-    cap.release()
+    # URL interna do serviço Go2RTC (dentro da rede Docker)
+    GO2RTC_API = "http://sense_go2rtc:1984/api"
+    stream_name = f"camera_{dev.id}"
     
-    if not ret:
-        raise HTTPException(status_code=500, detail="Não foi possível capturar frame")
-    
-    # Salva imagem estática
+    os.makedirs(config.FRAMES_DIR, exist_ok=True)
     filename = f"snapshot_{device_id}_{int(time.time())}.jpg"
     filepath = os.path.join(config.FRAMES_DIR, filename)
-    cv2.imwrite(filepath, frame)
     
+    # 1. Garante que o stream está registrado no Go2RTC
+    # (Mesmo que já esteja, o PUT atualiza ou confirma sem erro)
+    try:
+        print(f"📡 Registrando stream '{stream_name}' no Go2RTC...")
+        requests.put(f"{GO2RTC_API}/streams", params={"src": dev.rtsp_url, "name": stream_name}, timeout=3)
+    except Exception as e:
+        print(f"⚠️ Erro ao registrar stream no Go2RTC: {e}")
+        # Segue o fluxo, pois pode já existir
+
+    # 2. Tenta pegar o snapshot (frame.jpeg)
+    # Fazemos algumas tentativas pois se o stream estava parado, demora uns segundos para ter o frame
+    success = False
+    for attempt in range(5):
+        try:
+            print(f"📸 Solicitando frame ao Go2RTC (Tentativa {attempt+1}/5)...")
+            res = requests.get(f"{GO2RTC_API}/frame.jpeg", params={"src": stream_name}, timeout=5)
+            
+            if res.status_code == 200:
+                with open(filepath, "wb") as f:
+                    f.write(res.content)
+                success = True
+                print("✅ Snapshot capturado com sucesso via Go2RTC.")
+                break
+            else:
+                print(f"⏳ Go2RTC ainda não tem frame (Status {res.status_code}). Aguardando...")
+                time.sleep(1.5) # Espera o buffer encher
+        except Exception as e:
+            print(f"❌ Erro na requisição ao Go2RTC: {e}")
+            time.sleep(1)
+
+    if not success:
+        raise HTTPException(status_code=500, detail="Não foi possível obter snapshot do Go2RTC (Timeout/Codec)")
+
     return {"url": f"/static/frames/{filename}"}
 
 @app.get("/stream-camera/{device_id}")
