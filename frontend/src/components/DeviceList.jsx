@@ -4,6 +4,69 @@ import './DeviceList.css';
 
 const API_BASE = 'http://localhost:8000';
 
+const DrawingCanvas = ({ imageUrl, entrantPoints, setEntrantPoints, passerbyPoints, setPasserbyPoints, activeLine, inSide }) => {
+    const canvasRef = useRef(null);
+    const containerRef = useRef(null);
+    
+    const drawLine = (ctx, points, color, label) => {
+        if (points.length === 0) return;
+        ctx.strokeStyle = color; ctx.lineWidth = 3; ctx.fillStyle = color;
+        ctx.beginPath();
+        points.forEach((p, i) => { i===0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y); ctx.fillRect(p.x-3, p.y-3, 6, 6); });
+        ctx.stroke();
+
+        if (points.length >= 2) {
+            const mid = Math.floor(points.length/2);
+            const p1 = points[mid-1]||points[0]; const p2 = points[mid];
+            const mx = (p1.x+p2.x)/2; const my = (p1.y+p2.y)/2;
+            ctx.font = 'bold 16px Arial'; ctx.fillStyle = 'white';
+            ctx.fillText(label, mx+10, my-10);
+            if (label === "Entrantes") {
+                const dx = p2.x-p1.x; const dy = p2.y-p1.y;
+                // Vetor normal
+                const norm = {x: -dy, y: dx}; const len = Math.sqrt(norm.x**2+norm.y**2)||1;
+                const un = {x: norm.x/len, y: norm.y/len};
+                const t1 = {x: mx+un.x*30, y: my+un.y*30}; 
+                const t2 = {x: mx-un.x*30, y: my-un.y*30};
+                ctx.fillText(inSide==='right'?"IN":"OUT", t1.x, t1.y);
+                ctx.fillText(inSide==='right'?"OUT":"IN", t2.x, t2.y);
+            }
+        }
+    };
+
+    useEffect(() => {
+        const cvs = canvasRef.current; if(!cvs) return;
+        const ctx = cvs.getContext('2d');
+        const img = containerRef.current.querySelector('img');
+        if(img && img.complete) {
+            cvs.width = img.width; cvs.height = img.height;
+            ctx.clearRect(0,0,cvs.width,cvs.height);
+            drawLine(ctx, entrantPoints, '#00ff00', "Entrantes");
+            drawLine(ctx, passerbyPoints, '#ffff00', "Passantes");
+        }
+    }, [entrantPoints, passerbyPoints, activeLine, imageUrl, inSide]);
+
+    const handleClick = (e) => {
+        const rect = canvasRef.current.getBoundingClientRect();
+        const pt = {x: e.clientX-rect.left, y: e.clientY-rect.top};
+        activeLine === 'entrant' ? setEntrantPoints([...entrantPoints, pt]) : setPasserbyPoints([...passerbyPoints, pt]);
+    };
+
+    return (
+        <div ref={containerRef} className="drawing-container">
+            <img src={imageUrl} alt="Snapshot" onLoad={() => {
+                // Força redraw
+                const cvs = canvasRef.current;
+                if(cvs) {
+                     // Pequeno hack para garantir que o canvas tenha o tamanho da imagem carregada
+                     cvs.width = cvs.width; 
+                }
+            }}/>
+            <canvas ref={canvasRef} onClick={handleClick} />
+        </div>
+    );
+};
+
 const DeviceList = () => {
     const [savedDevices, setSavedDevices] = useState([]);
     const [scannedIps, setScannedIps] = useState([]);
@@ -18,6 +81,79 @@ const DeviceList = () => {
     const [viewingDevice, setViewingDevice] = useState(null);
     const [streamUrl, setStreamUrl] = useState(null);
     const videoRef = useRef(null); // Referência direta ao elemento de vídeo
+
+    // ESTADOS PARA CONFIGURAÇÃO AVANÇADA
+    const [configDevice, setConfigDevice] = useState(null); // Dispositivo sendo configurado
+    const [snapshotUrl, setSnapshotUrl] = useState(null);
+    const [entrantPoints, setEntrantPoints] = useState([]);
+    const [passerbyPoints, setPasserbyPoints] = useState([]);
+    const [activeLine, setActiveLine] = useState('entrant');
+    const [inSide, setInSide] = useState('right');
+    const [schedule, setSchedule] = useState({ start: "08:00", end: "18:00" });
+
+    // Função para abrir o modal de configuração
+    const handleOpenConfig = async (device) => {
+        try {
+            // 1. Pega snapshot
+            const res = await getDeviceSnapshot(device.id);
+            setSnapshotUrl(`${API_BASE}${res.url}`);
+            
+            // 2. Carrega configurações existentes se houver
+            if (device.lines_config) {
+                const cfg = device.lines_config; // O backend já retorna como dict se for JSON
+                setEntrantPoints(cfg.entrant || []);
+                setPasserbyPoints(cfg.passerby || []);
+                setInSide(cfg.in_side || 'right');
+            } else {
+                setEntrantPoints([]);
+                setPasserbyPoints([]);
+            }
+
+            if (device.processing_start_time) {
+                setSchedule({ 
+                    start: device.processing_start_time, 
+                    end: device.processing_end_time 
+                });
+            }
+
+            setConfigDevice(device);
+        } catch (error) {
+            console.error(error);
+            alert("Erro ao carregar snapshot. A câmera está online?");
+        }
+    };
+
+    const handleSaveConfig = async () => {
+        if (!configDevice) return;
+        
+        const linesConfig = {
+            entrant: entrantPoints,
+            passerby: passerbyPoints,
+            in_side: inSide
+        };
+
+        const payload = {
+            // Precisamos reenviar os dados obrigatórios
+            name: configDevice.name,
+            username: configDevice.username,
+            password: configDevice.password,
+            manufacturer: configDevice.manufacturer,
+            // Novos dados
+            processing_start_time: schedule.start,
+            processing_end_time: schedule.end,
+            lines_config: linesConfig
+        };
+
+        try {
+            await updateDeviceAdvanced(configDevice.id, payload);
+            alert("Configuração salva com sucesso!");
+            setConfigDevice(null);
+            loadSavedDevices(); // Recarrega para atualizar o estado local
+        } catch (error) {
+            console.error(error);
+            alert("Erro ao salvar configuração.");
+        }
+    };
 
     const handleViewStream = async (device) => {
         try {
@@ -197,6 +333,54 @@ const DeviceList = () => {
                                 </button>
                             </div>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL DE CONFIGURAÇÃO AVANÇADA */}
+            {configDevice && snapshotUrl && (
+                <div className="modal-overlay">
+                    <div className="modal-content config-modal" style={{width: '900px', maxWidth: '95%'}}>
+                        <h3>Configurar: {configDevice.name}</h3>
+                        
+                        <div className="config-grid" style={{display:'flex', gap:'20px', flexWrap:'wrap'}}>
+                            <div className="config-visual" style={{flex: 2, minWidth: '300px'}}>
+                                <h4>1. Desenhe as Linhas</h4>
+                                <div className="drawing-buttons">
+                                    <button style={{background: activeLine==='entrant'?'#00cc00':'#555'}} onClick={()=>setActiveLine('entrant')}>Linha Entrada (Verde)</button>
+                                    <button style={{background: activeLine==='passerby'?'#cccc00':'#555'}} onClick={()=>setActiveLine('passerby')}>Linha Passagem (Amarelo)</button>
+                                    <button onClick={()=>activeLine==='entrant'?setEntrantPoints([]):setPasserbyPoints([])}>Limpar</button>
+                                    <button onClick={()=>setInSide(inSide==='right'?'left':'right')}>Inverter Lado</button>
+                                </div>
+                                <DrawingCanvas 
+                                    imageUrl={snapshotUrl} 
+                                    entrantPoints={entrantPoints} 
+                                    setEntrantPoints={setEntrantPoints} 
+                                    passerbyPoints={passerbyPoints} 
+                                    setPasserbyPoints={setPasserbyPoints} 
+                                    activeLine={activeLine} 
+                                    inSide={inSide}
+                                />
+                            </div>
+
+                            <div className="config-form" style={{flex: 1, minWidth: '250px'}}>
+                                <h4>2. Agendamento</h4>
+                                <p>Defina o horário de funcionamento da IA para esta câmera.</p>
+                                <div className="form-group">
+                                    <label>Início Processamento:</label>
+                                    <input type="time" value={schedule.start} onChange={e => setSchedule({...schedule, start: e.target.value})} />
+                                </div>
+                                <div className="form-group">
+                                    <label>Fim Processamento:</label>
+                                    <input type="time" value={schedule.end} onChange={e => setSchedule({...schedule, end: e.target.value})} />
+                                </div>
+                                
+                                <div className="modal-actions" style={{marginTop: '50px'}}>
+                                    <button onClick={() => setConfigDevice(null)}>Cancelar</button>
+                                    <button className="btn-connect" onClick={handleSaveConfig}>Salvar Configuração</button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}

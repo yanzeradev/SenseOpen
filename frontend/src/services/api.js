@@ -47,4 +47,17 @@ export const configureDevice = async (deviceId, configData) => {
   return response.data;
 };
 
+// Busca um snapshot (frame estático) da câmera para configuração
+export const getDeviceSnapshot = async (deviceId) => {
+  const response = await api.get(`/devices/${deviceId}/snapshot`);
+  return response.data; // Retorna { url: "/static/frames/..." }
+};
+
+// Atualiza a configuração avançada (Horários e Linhas)
+// Nota: Reutilizamos a rota de config, enviando os dados novos junto com os antigos
+export const updateDeviceAdvanced = async (deviceId, fullConfigData) => {
+  const response = await api.put(`/devices/${deviceId}/config`, fullConfigData);
+  return response.data;
+};
+
 export default api;

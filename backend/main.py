@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 from urllib.parse import quote
 
 # Importações do projeto
-from sense import config, video_process, geometry
+from sense import config, video_process, geometry, live_manager
 import crud, models, schemas
 from database import engine, get_db
 import subprocess
@@ -41,10 +41,15 @@ processing_jobs: Dict[str, Dict[str, Any]] = {}
 async def lifespan(app: FastAPI):
     print("Iniciando o servidor...")
     try:
+        # Carrega Modelos IA
         ml_models["processor"] = video_process.VideoProcessor()
         print("✅ VideoProcessor carregado.")
+        
+        # Inicia Scheduler em Background
+        asyncio.create_task(live_manager.scheduler_loop(ml_models))
+        
     except Exception as e:
-        print(f"❌ Erro no VideoProcessor: {e}")
+        print(f"❌ Erro no VideoProcessor ou Scheduler: {e}")
         ml_models["processor"] = None
     yield
     ml_models.clear()
@@ -558,6 +563,46 @@ def delete_device(device_id: int, db: Session = Depends(get_db)):
         db.delete(dev)
         db.commit()
     return {"ok": True}
+
+@app.put("/devices/{device_id}/config")
+def update_device_configuration(device_id: int, config_data: schemas.DeviceUpdate, db: Session = Depends(get_db)):
+    """
+    Atualiza configurações avançadas: Horários e Linhas de Contagem.
+    """
+    dev = db.query(models.Device).filter(models.Device.id == device_id).first()
+    if not dev:
+        raise HTTPException(status_code=404, detail="Dispositivo não encontrado")
+    
+    # Atualiza usando a função do CRUD (certifique-se que o CRUD já suporta os novos campos)
+    # Passamos a URL atual para manter a mesma
+    crud.update_device_config(db, device_id, config_data, dev.rtsp_url)
+    return {"status": "updated"}
+
+@app.get("/devices/{device_id}/snapshot")
+def get_device_snapshot(device_id: int, db: Session = Depends(get_db)):
+    """
+    Captura 1 frame da câmera para auxiliar no desenho das linhas no Frontend.
+    """
+    dev = db.query(models.Device).filter(models.Device.id == device_id).first()
+    if not dev:
+        raise HTTPException(status_code=404, detail="Dispositivo não encontrado")
+    
+    cap = cv2.VideoCapture(dev.rtsp_url)
+    if not cap.isOpened():
+        raise HTTPException(status_code=500, detail="Não foi possível conectar na câmera")
+        
+    ret, frame = cap.read()
+    cap.release()
+    
+    if not ret:
+        raise HTTPException(status_code=500, detail="Não foi possível capturar frame")
+    
+    # Salva imagem estática
+    filename = f"snapshot_{device_id}_{int(time.time())}.jpg"
+    filepath = os.path.join(config.FRAMES_DIR, filename)
+    cv2.imwrite(filepath, frame)
+    
+    return {"url": f"/static/frames/{filename}"}
 
 @app.get("/stream-camera/{device_id}")
 def stream_camera_feed(device_id: int, db: Session = Depends(get_db)):

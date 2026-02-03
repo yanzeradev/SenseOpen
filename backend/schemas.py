@@ -41,6 +41,9 @@ class DeviceUpdate(BaseModel):
     username: str
     password: str
     manufacturer: str
+    processing_start_time: Optional[str] = None
+    processing_end_time: Optional[str] = None
+    lines_config: Optional[dict] = None
     
 class DeviceResponse(DeviceBase):
     id: int
@@ -49,6 +52,9 @@ class DeviceResponse(DeviceBase):
     manufacturer: str | None = None
     is_configured: bool
     rtsp_url: str | None = None
+    processing_start_time: Optional[str] = None
+    processing_end_time: Optional[str] = None
+    lines_config: Optional[dict] = None
 
     class Config:
         from_attributes = True

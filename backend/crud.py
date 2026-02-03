@@ -58,6 +58,12 @@ def update_device_config(db: Session, device_id: int, config: schemas.DeviceUpda
         dev.username = config.username
         dev.password = config.password
         dev.manufacturer = config.manufacturer
+        if config.processing_start_time is not None:
+            dev.processing_start_time = config.processing_start_time
+        if config.processing_end_time is not None:
+            dev.processing_end_time = config.processing_end_time
+        if config.lines_config is not None:
+            dev.lines_config = config.lines_config
         dev.rtsp_url = rtsp_url
         dev.is_configured = True
         if not dev.client_id:
