@@ -370,12 +370,11 @@ const DeviceList = () => {
                         <p>IP: <strong>{authData.ip || 'Manual'}</strong></p>
                         
                         <form onSubmit={handleConnect}>
-                            {!authData.ip && (
-                                <div className="form-group">
-                                    <label>IP da Câmera:</label>
-                                    <input type="text" value={authData.ip} onChange={e => setAuthData({...authData, ip: e.target.value})} required placeholder="Ex: 192.168.0.105" />
-                                </div>
-                            )}
+                            <div className="form-group">
+                                <label>IP da Câmera:</label>
+                                <input type="text" value={authData.ip} onChange={e => setAuthData({...authData, ip: e.target.value})} required placeholder="Ex: 192.168.0.105" />
+                            </div>
+                        
                             
                             <div className="form-group">
                                 <label>Usuário (Câmera):</label>
@@ -461,7 +460,16 @@ const DeviceList = () => {
                         </div>
                         
                         {/* ÁREA DO VIDEO PROCESSADO */}
-                        <div className="monitor-video-container" style={{background: '#000', minHeight: '400px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '20px', border: '2px solid #333'}}>
+                        <div className="monitor-video-container" style={{
+                            background: '#000', 
+                            minHeight: '400px', 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            justifyContent: 'center', 
+                            marginBottom: '20px', 
+                            border: '2px solid #333',
+                            overflow: 'hidden'
+                        }}> 
                             {liveStats && liveStats.status === 'online' ? (
                                 <img 
                                     src={`${API_BASE}/devices/${statsDevice.id}/monitor_stream`} 
