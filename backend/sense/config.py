@@ -21,7 +21,7 @@ os.makedirs(REPORTS_DIR, exist_ok=True)
 # O usuário deve baixar os modelos e colocar na pasta 'sense' ou raiz
 # Tenta usar o modelo TensorRT (.engine) se existir, senão usa o .pt
 _yolo_pt = os.path.join(BASE_DIR, 'sense', 'model_coco_crowd.pt')
-_yolo_engine = os.path.join(BASE_DIR, 'sense', 'model_coco_crowd.onnx')
+_yolo_engine = os.path.join(BASE_DIR, 'sense', 'model_coco_crowd.engine')
 
 # Lógica de seleção automática
 if os.path.exists(_yolo_engine):
