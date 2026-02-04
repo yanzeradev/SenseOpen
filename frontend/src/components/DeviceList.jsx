@@ -370,12 +370,11 @@ const DeviceList = () => {
                         <p>IP: <strong>{authData.ip || 'Manual'}</strong></p>
                         
                         <form onSubmit={handleConnect}>
-                            {!authData.ip && (
-                                <div className="form-group">
-                                    <label>IP da Câmera:</label>
-                                    <input type="text" value={authData.ip} onChange={e => setAuthData({...authData, ip: e.target.value})} required placeholder="Ex: 192.168.0.105" />
-                                </div>
-                            )}
+                            <div className="form-group">
+                                <label>IP da Câmera:</label>
+                                <input type="text" value={authData.ip} onChange={e => setAuthData({...authData, ip: e.target.value})} required placeholder="Ex: 192.168.0.105" />
+                            </div>
+                        
                             
                             <div className="form-group">
                                 <label>Usuário (Câmera):</label>
