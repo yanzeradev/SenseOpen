@@ -19,7 +19,17 @@ os.makedirs(REPORTS_DIR, exist_ok=True)
 
 # --- MODELOS DE IA (Caminhos Relativos) ---
 # O usuário deve baixar os modelos e colocar na pasta 'sense' ou raiz
-YOLO_MODEL_PATH = os.path.join(BASE_DIR, 'sense', 'model_coco_crowd.pt') 
+# Tenta usar o modelo TensorRT (.engine) se existir, senão usa o .pt
+_yolo_pt = os.path.join(BASE_DIR, 'sense', 'model_coco_crowd.pt')
+_yolo_engine = os.path.join(BASE_DIR, 'sense', 'model_coco_crowd.onnx')
+
+# Lógica de seleção automática
+if os.path.exists(_yolo_engine):
+    print(f"[CONFIG] Modelo TensorRT detectado: {_yolo_engine}")
+    YOLO_MODEL_PATH = _yolo_engine
+else:
+    print(f"[CONFIG] Usando modelo padrão PyTorch: {_yolo_pt}")
+    YOLO_MODEL_PATH = _yolo_pt
 REID_MODEL_PATH = os.path.join(BASE_DIR, 'sense', 'osnet_x1_0_imagenet.pth')
 
 # --- DEVICE (GPU/CPU) ---
