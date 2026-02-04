@@ -190,6 +190,9 @@ async def run_live_camera_ffmpeg(device_id, rtsp_url, lines_config, stop_event, 
             
             if len(raw_frame) != FRAME_SIZE:
                 print(f"⚠️ Frame incompleto dev {device_id}. Reiniciando pipe...")
+                # Recalcula dimensões antes de reiniciar para garantir que não mudaram
+                WIDTH, HEIGHT = get_stream_resolution(local_rtsp)
+                FRAME_SIZE = WIDTH * HEIGHT * 3
                 process.terminate()
                 await asyncio.sleep(2)
                 process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=10**8)
