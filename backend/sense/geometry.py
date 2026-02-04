@@ -1,12 +1,28 @@
 import numpy as np
 
+def _get_xy(point):
+    """
+    Função auxiliar para extrair X e Y, seja de um dict {'x':1, 'y':2} ou lista [1, 2].
+    Isso resolve o erro TypeError no log.
+    """
+    if isinstance(point, dict):
+        return point.get('x', 0), point.get('y', 0)
+    return point[0], point[1]
+
 def get_point_side(point, line_points):
     """Retorna 'right', 'left' ou 'on_line'."""
     if len(line_points) < 2: return 'on_line'
+    
     x, y = point
-    p1 = np.array([line_points[0]['x'], line_points[0]['y']])
-    p2 = np.array([line_points[-1]['x'], line_points[-1]['y']])
+    
+    # Extrai coordenadas de forma segura
+    x1, y1 = _get_xy(line_points[0])
+    x2, y2 = _get_xy(line_points[-1])
+    
+    p1 = np.array([x1, y1])
+    p2 = np.array([x2, y2])
     p = np.array([x, y])
+    
     cross = np.cross(p2 - p1, p - p1)
     if cross > 20: return 'right'
     elif cross < -20: return 'left'
@@ -23,19 +39,16 @@ def get_closest_segment_side(point, line_points):
     min_dist_sq = float('inf')
     side = 'unknown'
 
-    # Itera sobre todos os segmentos da linha desenhada (ponto A até ponto B)
+    # Itera sobre todos os segmentos da linha desenhada
     for i in range(len(line_points) - 1):
-        p1 = line_points[i]
-        p2 = line_points[i+1]
-        
-        x1, y1 = p1['x'], p1['y']
-        x2, y2 = p2['x'], p2['y']
+        x1, y1 = _get_xy(line_points[i])
+        x2, y2 = _get_xy(line_points[i+1])
         
         # Vetor do segmento
         dx, dy = x2 - x1, y2 - y1
         if dx == 0 and dy == 0: continue
 
-        # Projeção do ponto no segmento para achar a distância
+        # Projeção do ponto no segmento
         t = ((px - x1) * dx + (py - y1) * dy) / (dx*dx + dy*dy)
         t = max(0, min(1, t)) # Clampa entre 0 e 1
         
@@ -74,8 +87,11 @@ def bbox_intersects_line(bbox, line_points):
     # Define segmentos da linha desenhada pelo usuário
     poly_segments = []
     for i in range(len(line_points) - 1):
-        p_start = (int(line_points[i]['x']), int(line_points[i]['y']))
-        p_end = (int(line_points[i+1]['x']), int(line_points[i+1]['y']))
+        lx1, ly1 = _get_xy(line_points[i])
+        lx2, ly2 = _get_xy(line_points[i+1])
+        
+        p_start = (int(lx1), int(ly1))
+        p_end = (int(lx2), int(ly2))
         poly_segments.append((p_start, p_end))
 
     # Verifica interseção
@@ -85,10 +101,11 @@ def bbox_intersects_line(bbox, line_points):
            (x1 <= p_end[0] <= x2 and y1 <= p_end[1] <= y2):
             return True
 
-        # Verifica interseção de arestas
+        # Verifica interseção de arestas (Algoritmo CCW)
         for b_start, b_end in bbox_lines:
             def ccw(A,B,C):
                 return (C[1]-A[1]) * (B[0]-A[0]) > (B[1]-A[1]) * (C[0]-A[0])
+            
             if ccw(p_start,b_start,b_end) != ccw(p_end,b_start,b_end) and \
                ccw(p_start,p_end,b_start) != ccw(p_start,p_end,b_end):
                 return True

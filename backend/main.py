@@ -6,7 +6,7 @@ import asyncio
 import json
 import numpy as np
 import pandas as pd
-from datetime import timedelta
+from datetime import timedelta, datetime
 import ffmpeg
 import json
 import requests
@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 from urllib.parse import quote
 
 # Importações do projeto
-from sense import config, video_process, geometry
+from sense import config, video_process, geometry, live_manager
 import crud, models, schemas
 from database import engine, get_db
 import subprocess
@@ -41,10 +41,15 @@ processing_jobs: Dict[str, Dict[str, Any]] = {}
 async def lifespan(app: FastAPI):
     print("Iniciando o servidor...")
     try:
+        # Carrega Modelos IA
         ml_models["processor"] = video_process.VideoProcessor()
         print("✅ VideoProcessor carregado.")
+        
+        # Inicia Scheduler em Background
+        asyncio.create_task(live_manager.scheduler_loop(ml_models))
+        
     except Exception as e:
-        print(f"❌ Erro no VideoProcessor: {e}")
+        print(f"❌ Erro no VideoProcessor ou Scheduler: {e}")
         ml_models["processor"] = None
     yield
     ml_models.clear()
@@ -303,6 +308,32 @@ async def run_video_processing(video_id: str, line_ent_raw: list, line_pass_raw:
     crud.update_video_after_processing(db, video_id, out_path, report_url, final_counts, "done")
     await manager.send_final_results(client_id, {"counts": final_counts, "report_url": report_url})
 
+@app.get("/devices/{device_id}/monitor_stream")
+async def monitor_stream(device_id: int):
+    """
+    Stream MJPEG em tempo real do processamento da IA (Visual).
+    """
+    # Verifica se o dispositivo tem uma fila ativa no live_manager
+    if device_id not in live_manager.monitor_queues:
+        # Se não estiver rodando (fora do horário?), retorna erro ou imagem estática
+        return Response(status_code=404, content="Monitoramento inativo ou câmera desligada.")
+
+    async def frame_generator():
+        q = live_manager.monitor_queues[device_id]
+        while True:
+            try:
+                # Aguarda novo frame processado (timeout para não travar conexões mortas)
+                frame_bytes = await asyncio.wait_for(q.get(), timeout=5.0)
+                
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+            except asyncio.TimeoutError:
+                break
+            except Exception as e:
+                print(f"Erro stream monitoring: {e}")
+                break
+
+    return StreamingResponse(frame_generator(), media_type="multipart/x-mixed-replace; boundary=frame")
     
 @app.post("/upload-video/")
 async def upload_video(video_file: UploadFile = File(...), db: Session = Depends(get_db)):
@@ -558,6 +589,104 @@ def delete_device(device_id: int, db: Session = Depends(get_db)):
         db.delete(dev)
         db.commit()
     return {"ok": True}
+
+@app.put("/devices/{device_id}/config")
+def update_device_configuration(device_id: int, config_data: schemas.DeviceUpdate, db: Session = Depends(get_db)):
+    """
+    Atualiza configurações avançadas: Horários e Linhas de Contagem.
+    """
+    dev = db.query(models.Device).filter(models.Device.id == device_id).first()
+    if not dev:
+        raise HTTPException(status_code=404, detail="Dispositivo não encontrado")
+    
+    # Atualiza usando a função do CRUD (certifique-se que o CRUD já suporta os novos campos)
+    # Passamos a URL atual para manter a mesma
+    crud.update_device_config(db, device_id, config_data, dev.rtsp_url)
+    return {"status": "updated"}
+
+@app.get("/devices/{device_id}/snapshot")
+def get_device_snapshot(device_id: int, db: Session = Depends(get_db)):
+    """
+    Captura 1 frame solicitando diretamente ao Go2RTC (que lida bem com H.265).
+    """
+    dev = db.query(models.Device).filter(models.Device.id == device_id).first()
+    if not dev:
+        raise HTTPException(status_code=404, detail="Dispositivo não encontrado")
+    
+    # URL interna do serviço Go2RTC (dentro da rede Docker)
+    GO2RTC_API = "http://sense_go2rtc:1984/api"
+    stream_name = f"camera_{dev.id}"
+    
+    os.makedirs(config.FRAMES_DIR, exist_ok=True)
+    filename = f"snapshot_{device_id}_{int(time.time())}.jpg"
+    filepath = os.path.join(config.FRAMES_DIR, filename)
+    
+    # 1. Garante que o stream está registrado no Go2RTC
+    # (Mesmo que já esteja, o PUT atualiza ou confirma sem erro)
+    try:
+        print(f"📡 Registrando stream '{stream_name}' no Go2RTC...")
+        requests.put(f"{GO2RTC_API}/streams", params={"src": dev.rtsp_url, "name": stream_name}, timeout=3)
+    except Exception as e:
+        print(f"⚠️ Erro ao registrar stream no Go2RTC: {e}")
+        # Segue o fluxo, pois pode já existir
+
+    # 2. Tenta pegar o snapshot (frame.jpeg)
+    # Fazemos algumas tentativas pois se o stream estava parado, demora uns segundos para ter o frame
+    success = False
+    for attempt in range(5):
+        try:
+            print(f"📸 Solicitando frame ao Go2RTC (Tentativa {attempt+1}/5)...")
+            res = requests.get(f"{GO2RTC_API}/frame.jpeg", params={"src": stream_name}, timeout=5)
+            
+            if res.status_code == 200:
+                with open(filepath, "wb") as f:
+                    f.write(res.content)
+                success = True
+                print("✅ Snapshot capturado com sucesso via Go2RTC.")
+                break
+            else:
+                print(f"⏳ Go2RTC ainda não tem frame (Status {res.status_code}). Aguardando...")
+                time.sleep(1.5) # Espera o buffer encher
+        except Exception as e:
+            print(f"❌ Erro na requisição ao Go2RTC: {e}")
+            time.sleep(1)
+
+    if not success:
+        raise HTTPException(status_code=500, detail="Não foi possível obter snapshot do Go2RTC (Timeout/Codec)")
+
+    return {"url": f"/static/frames/{filename}"}
+
+@app.get("/devices/{device_id}/live_stats")
+def get_device_live_stats(device_id: int, db: Session = Depends(get_db)):
+    try:
+        prefix = f"live_{device_id}_"
+        latest_video = db.query(models.Video)\
+            .filter(models.Video.id.like(f"{prefix}%"))\
+            .order_by(models.Video.created_at.desc())\
+            .first()
+
+        if not latest_video:
+            return {"status": "offline", "message": "Aguardando inicio..."}
+
+        # Garante que data não seja None
+        data = latest_video.results if latest_video.results else {}
+
+        if latest_video.status != "live_processing":
+            return {
+                "status": "stopped", 
+                "data": data,
+                "last_update": str(latest_video.created_at)
+            }
+
+        return {
+            "status": "online",
+            "data": data,
+            "server_time": datetime.now().strftime("%H:%M:%S")
+        }
+    except Exception as e:
+        print(f"Erro em live_stats: {e}")
+        # Retorna erro tratado 500 mas com JSON para não quebrar o frontend
+        return {"status": "error", "message": str(e)}
 
 @app.get("/stream-camera/{device_id}")
 def stream_camera_feed(device_id: int, db: Session = Depends(get_db)):

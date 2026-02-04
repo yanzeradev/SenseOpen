@@ -19,6 +19,9 @@ class Device(Base):
     password = Column(String, nullable=True)
     rtsp_url = Column(String, nullable=True)
     is_configured = Column(Boolean, default=False)
+    processing_start_time = Column(String, nullable=True) # Ex: "08:00"
+    processing_end_time = Column(String, nullable=True)   # Ex: "18:00"
+    lines_config = Column(JSON, nullable=True)
 
 class Video(Base):
     __tablename__ = "videos"
