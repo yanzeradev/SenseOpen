@@ -28,22 +28,33 @@ async def restart_camera(device_id):
     if device_id in stop_signals:
         print(f"🔄 Reiniciando Câmera {device_id} para aplicar novas configurações...")
         stop_signals[device_id].set()
-        # O scheduler limpará a task morta e iniciará uma nova instância.
+        
+        if device_id in active_tasks:
+            try:
+                # Aguarda brevemente para garantir que o loop anterior encerre
+                await asyncio.wait_for(active_tasks[device_id], timeout=2.0)
+            except: pass
+            del active_tasks[device_id]
+        
+        if device_id in stop_signals: del stop_signals[device_id]
+        if device_id in monitor_queues: del monitor_queues[device_id]
 
 def get_stream_resolution(rtsp_url):
     try:
         cmd = ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", rtsp_url]
         output = subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode().strip()
         if output:
-            w, h = map(int, output.split(','))
-            return w, h
+            parts = output.split(',')
+            if len(parts) >= 2:
+                w, h = int(parts[0]), int(parts[1])
+                if w > 0 and h > 0: return w, h
     except: pass
     try:
         cap = cv2.VideoCapture(rtsp_url)
         if cap.isOpened():
             w, h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             cap.release()
-            return w, h
+            if w > 0 and h > 0: return w, h
     except: pass
     return 1920, 1080
 
@@ -109,7 +120,7 @@ async def scheduler_loop(processor_ref):
             print(f"❌ Erro Crítico no Scheduler: {e}")
             traceback.print_exc()
         
-        await asyncio.sleep(10)
+        await asyncio.sleep(3)
 
 def draw_visuals(frame, tracks, line_ent, line_pass, counts, fps):
     # Desenha Linhas
@@ -181,7 +192,11 @@ async def run_live_camera_ffmpeg(device_id, rtsp_url, lines_config, stop_event, 
         WIDTH, HEIGHT = get_stream_resolution(local_rtsp)
         FRAME_SIZE = WIDTH * HEIGHT * 3 
 
-        print(f"🔌 Iniciando Processamento Visual: {local_rtsp}")
+        print(f"🔌 Iniciando Processamento Visual: {local_rtsp} ({WIDTH}x{HEIGHT})")
+        
+        if WIDTH == 0 or HEIGHT == 0:
+            print("❌ Resolução inválida (0x0). Tentando novamente em breve...")
+            return
 
         command = ['ffmpeg', '-rtsp_transport', 'tcp', '-i', local_rtsp, '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-r', '15', '-an', '-sn', '-y', '-']
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=10**8)
@@ -219,13 +234,20 @@ async def run_live_camera_ffmpeg(device_id, rtsp_url, lines_config, stop_event, 
             
             if len(raw_frame) != FRAME_SIZE:
                 print(f"⚠️ Frame incompleto dev {device_id}. Reiniciando pipe...")
+                # Reduzido tempo de espera na falha de leitura
                 process.terminate()
-                await asyncio.sleep(2)
+                await asyncio.sleep(0.5)
                 process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=10**8)
                 continue
 
             # Frame bufferizado -> Numpy
-            frame = np.frombuffer(raw_frame, np.uint8).reshape((HEIGHT, WIDTH, 3)).copy()
+            try:
+                frame = np.frombuffer(raw_frame, np.uint8).reshape((HEIGHT, WIDTH, 3)).copy()
+            except Exception:
+                continue
+
+            # PROTEÇÃO: Se frame estiver vazio
+            if frame.size == 0: continue
 
             frame_count += 1
             if time.time() - t0 > 1:
@@ -246,23 +268,21 @@ async def run_live_camera_ffmpeg(device_id, rtsp_url, lines_config, stop_event, 
             for t in tracks:
                 tid = t["track_id"]
                 bbox = t["bbox"]
-                # Ponto de Referência: Centro do BBox (Bolinha Vermelha)
                 ref_point = (int((bbox[0]+bbox[2])/2), int((bbox[1]+bbox[3])/2))
 
                 if tid not in track_states:
                     track_states[tid] = {
-                        'status': 'neutral',  # neutral -> passerby -> entrant
+                        'status': 'neutral', 
                         'last_point': ref_point
                     }
                 
                 state = track_states[tid]
-                prev_point = state['last_point']
+                prev_point = state.get('last_point', ref_point)
 
                 # Só processa se houve deslocamento
                 if prev_point != ref_point:
                     
                     # 1. VERIFICAÇÃO PASSANTES (Qualquer sentido)
-                    # Se cruzar qualquer segmento da linha de passantes, conta.
                     crossed_pass = False
                     for i in range(len(line_pass) - 1):
                         if geometry.segments_intersect(prev_point, ref_point, line_pass[i], line_pass[i+1]):
@@ -270,44 +290,34 @@ async def run_live_camera_ffmpeg(device_id, rtsp_url, lines_config, stop_event, 
                             break
                     
                     if crossed_pass:
-                        # Se ainda não foi contado como passante (e não é entrante ainda)
                         if state['status'] == 'neutral':
                             state['status'] = 'passerby'
                             counts['passantes']['Person'] += 1
                             counts['passantes']['Total'] += 1
 
                     # 2. VERIFICAÇÃO ENTRANTES (Sentido OUT -> IN)
-                    # Verifica se cruzou algum segmento da linha de entrada
                     for i in range(len(line_ent) - 1):
                         p_start = line_ent[i]
                         p_end = line_ent[i+1]
                         
                         if geometry.segments_intersect(prev_point, ref_point, p_start, p_end):
-                            # Cruzou a linha física. Agora validamos a direção.
-                            # Para ser entrante, o ponto ANTERIOR deve estar no lado 'OUT'.
-                            # Se in_side='right', então out_side='left'.
-                            
                             side_prev = geometry.get_side_of_segment(prev_point, p_start, p_end)
                             required_prev_side = 'left' if in_side == 'right' else 'right'
 
                             if side_prev == required_prev_side:
-                                # Transição de Estado
                                 if state['status'] == 'neutral':
                                     state['status'] = 'entrant'
                                     counts['entrantes']['Person'] += 1
                                     counts['entrantes']['Total'] += 1
                                     
                                 elif state['status'] == 'passerby':
-                                    # Correção da Dupla Contagem:
-                                    # Se ele já era passante, removemos dele e jogamos para entrante
                                     state['status'] = 'entrant'
                                     counts['passantes']['Person'] -= 1
                                     counts['passantes']['Total'] -= 1
                                     counts['entrantes']['Person'] += 1
                                     counts['entrantes']['Total'] += 1
-                                break # Já contou, sai do loop de segmentos
+                                break 
 
-                # Atualiza ponto anterior para o próximo frame
                 state['last_point'] = ref_point
 
             # --- DESENHO E STREAMING ---
