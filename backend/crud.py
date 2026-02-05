@@ -110,7 +110,22 @@ def update_video_after_processing(db: Session, video_id: str, processed_path: st
         db.refresh(db_video)
     return db_video
 
-# NOVA FUNÇÃO ABAIXO
+def get_latest_live_results(db: Session, device_id: int):
+    """
+    Recupera o último resultado de contagem (JSON) de uma câmera ao vivo.
+    Isso permite reiniciar o processo mantendo os números acumulados.
+    """
+    prefix = f"live_{device_id}_"
+    # Busca o vídeo mais recente deste dispositivo
+    latest = db.query(models.Video)\
+        .filter(models.Video.id.like(f"{prefix}%"))\
+        .order_by(models.Video.created_at.desc())\
+        .first()
+    
+    if latest and latest.results:
+        return latest.results
+    return None
+
 def delete_video_by_id(db: Session, video: models.Video):
     db.delete(video)
     db.commit()

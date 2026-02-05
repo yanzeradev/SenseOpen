@@ -674,18 +674,21 @@ def delete_device(device_id: int, db: Session = Depends(get_db)):
     return {"ok": True}
 
 @app.put("/devices/{device_id}/config")
-def update_device_configuration(device_id: int, config_data: schemas.DeviceUpdate, db: Session = Depends(get_db)):
+async def update_device_configuration(device_id: int, config_data: schemas.DeviceUpdate, db: Session = Depends(get_db)):
     """
-    Atualiza configurações avançadas: Horários e Linhas de Contagem.
+    Atualiza configurações avançadas e reinicia a câmera mantendo a contagem.
     """
     dev = db.query(models.Device).filter(models.Device.id == device_id).first()
     if not dev:
         raise HTTPException(status_code=404, detail="Dispositivo não encontrado")
     
-    # Atualiza usando a função do CRUD (certifique-se que o CRUD já suporta os novos campos)
-    # Passamos a URL atual para manter a mesma
+    # Atualiza configurações no banco
     crud.update_device_config(db, device_id, config_data, dev.rtsp_url)
-    return {"status": "updated"}
+    
+    # Aciona o Hot Reload
+    await live_manager.restart_camera(device_id)
+    
+    return {"status": "updated", "message": "Configurações aplicadas. A câmera será reiniciada em breve."}
 
 @app.get("/devices/{device_id}/snapshot")
 def get_device_snapshot(device_id: int, db: Session = Depends(get_db)):

@@ -19,6 +19,17 @@ monitor_queues = {}
 active_tasks = {}
 stop_signals = {} 
 
+async def restart_camera(device_id):
+    """
+    Força a parada de uma câmera. 
+    O Scheduler (Self-Healing) detectará que ela parou e a reiniciará automaticamente 
+    no próximo ciclo (dentro de ~10s) com as novas configurações do banco.
+    """
+    if device_id in stop_signals:
+        print(f"🔄 Reiniciando Câmera {device_id} para aplicar novas configurações...")
+        stop_signals[device_id].set()
+        # O scheduler limpará a task morta e iniciará uma nova instância.
+
 def get_stream_resolution(rtsp_url):
     try:
         cmd = ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", rtsp_url]
@@ -147,10 +158,25 @@ async def run_live_camera_ffmpeg(device_id, rtsp_url, lines_config, stop_event, 
 
         local_rtsp = f"rtsp://sense_go2rtc:8554/{stream_name}"
         
-        # Inicializa DB
+        # 1. Recupera Contagem Anterior (Persistência)
+        last_results = crud.get_latest_live_results(db, device_id)
+        
         initial_stats = {"total_geral": {"Total": 0}, "entrantes": {"Person": 0, "Total": 0}, "passantes": {"Person": 0, "Total": 0}}
+        
+        if last_results:
+            print(f"♻️ Restaurando histórico da Câmera {device_id}: {last_results['total_geral']}")
+            # Copia os dados anteriores para iniciar deste ponto
+            initial_stats = last_results
+
+        # Inicializa DB com os dados recuperados ou zerados
         crud.create_user_video(db, 0, video_id, rtsp_url, "")
         crud.update_video_after_processing(db, video_id, None, None, initial_stats, "live_processing")
+
+        # Inicializa variáveis de contagem com os valores iniciais
+        counts = {
+            "entrantes": initial_stats.get("entrantes", {"Person": 0, "Total": 0}),
+            "passantes": initial_stats.get("passantes", {"Person": 0, "Total": 0})
+        }
 
         WIDTH, HEIGHT = get_stream_resolution(local_rtsp)
         FRAME_SIZE = WIDTH * HEIGHT * 3 
