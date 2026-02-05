@@ -470,7 +470,16 @@ const DeviceList = () => {
                         </div>
                         
                         {/* ÁREA DO VIDEO PROCESSADO */}
-                        <div className="monitor-video-container" style={{background: '#000', minHeight: '400px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '20px', border: '2px solid #333'}}>
+                        <div className="monitor-video-container" style={{
+                            background: '#000', 
+                            minHeight: '400px', 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            justifyContent: 'center', 
+                            marginBottom: '20px', 
+                            border: '2px solid #333',
+                            overflow: 'hidden'
+                        }}> 
                             {liveStats && liveStats.status === 'online' ? (
                                 <img 
                                     src={`${API_BASE}/devices/${statsDevice.id}/monitor_stream`} 
