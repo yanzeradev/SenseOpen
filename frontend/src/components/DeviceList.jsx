@@ -75,7 +75,17 @@ const DrawingCanvas = ({ imageUrl, entrantPoints, setEntrantPoints, passerbyPoin
 
     return (
         <div ref={containerRef} className="drawing-container" style={{position: 'relative', display: 'inline-block', width: '100%'}}>
-            <img src={imageUrl} alt="Snapshot" style={{width: '100%', display: 'block'}} />
+            {/* Adicionado aspectRatio e objectFit para forçar 16:9 no snapshot de configuração */}
+            <img 
+                src={imageUrl} 
+                alt="Snapshot" 
+                style={{
+                    width: '100%', 
+                    display: 'block',
+                    aspectRatio: '16/9', 
+                    objectFit: 'fill'
+                }} 
+            />
             <canvas 
                 ref={canvasRef} 
                 onClick={handleClick} 
@@ -465,7 +475,16 @@ const DeviceList = () => {
                                 <img 
                                     src={`${API_BASE}/devices/${statsDevice.id}/monitor_stream`} 
                                     alt="Processamento em Tempo Real"
-                                    style={{maxWidth: '100%', maxHeight: '60vh', display: 'block'}} 
+                                    style={{
+                                        maxWidth: '100%', 
+                                        maxHeight: '60vh', 
+                                        display: 'block',
+                                        
+                                        width: '100%',        /* Força ocupar largura total */
+                                        aspectRatio: '16/9',  /* Força proporção Widescreen */
+                                        objectFit: 'fill'     /* Estica a imagem 4:3 para 16:9 */
+                                        
+                                    }} 
                                 />
                             ) : (
                                 <div style={{color: '#aaa'}}>

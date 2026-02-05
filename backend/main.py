@@ -394,27 +394,39 @@ async def run_video_processing(video_id: str, line_ent_raw: list, line_pass_raw:
 @app.get("/devices/{device_id}/monitor_stream")
 async def monitor_stream(device_id: int):
     """
-    Stream MJPEG em tempo real do processamento da IA (Visual).
+    Stream MJPEG Resiliente:
+    - Se a câmera estiver online, transmite o vídeo.
+    - Se estiver reiniciando/offline, transmite uma imagem de "Carregando..." sem cair a conexão.
+    Isso permite que o frontend reconecte visualmente de forma automática.
     """
-    # Verifica se o dispositivo tem uma fila ativa no live_manager
-    if device_id not in live_manager.monitor_queues:
-        # Se não estiver rodando (fora do horário?), retorna erro ou imagem estática
-        return Response(status_code=404, content="Monitoramento inativo ou câmera desligada.")
-
     async def frame_generator():
-        q = live_manager.monitor_queues[device_id]
+        # Prepara uma imagem preta com texto "Carregando..." para usar de fallback
+        loading_img = np.zeros((360, 640, 3), np.uint8)
+        cv2.putText(loading_img, "Carregando...", (180, 180), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+        ret, loading_buffer = cv2.imencode('.jpg', loading_img)
+        loading_bytes = loading_buffer.tobytes()
+
         while True:
-            try:
-                # Aguarda novo frame processado (timeout para não travar conexões mortas)
-                frame_bytes = await asyncio.wait_for(q.get(), timeout=5.0)
-                
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-            except asyncio.TimeoutError:
-                break
-            except Exception as e:
-                print(f"Erro stream monitoring: {e}")
-                break
+            # 1. Verifica se a câmera está ativa e com fila de frames
+            if device_id in live_manager.monitor_queues:
+                q = live_manager.monitor_queues[device_id]
+                try:
+                    # Tenta pegar frame com timeout curto (2s)
+                    # Se a câmera travar ou estiver reiniciando, vai dar timeout
+                    frame_bytes = await asyncio.wait_for(q.get(), timeout=2.0)
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                    continue
+                except (asyncio.TimeoutError, Exception):
+                    # Se der erro ou timeout, cai para o fallback abaixo
+                    pass
+            
+            # 2. Fallback: Câmera offline/reiniciando -> Envia frame "Carregando..."
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + loading_bytes + b'\r\n')
+            
+            # Espera um pouco para economizar recursos enquanto espera a câmera voltar
+            await asyncio.sleep(0.5)
 
     return StreamingResponse(frame_generator(), media_type="multipart/x-mixed-replace; boundary=frame")
     
