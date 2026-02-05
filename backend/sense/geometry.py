@@ -110,3 +110,53 @@ def bbox_intersects_line(bbox, line_points):
                ccw(p_start,p_end,b_start) != ccw(p_start,p_end,b_end):
                 return True
     return False
+
+def segments_intersect(p1, p2, p3, p4):
+    """
+    Verifica se o segmento de movimento (p1->p2) intercepta a linha virtual (p3-p4).
+    p1: Ponto Anterior (Track)
+    p2: Ponto Atual (Track - Bolinha Vermelha)
+    p3: Inicio da Linha
+    p4: Fim da Linha
+    """
+    def ccw(A, B, C):
+        return (C[1]-A[1]) * (B[0]-A[0]) > (B[1]-A[1]) * (C[0]-A[0])
+
+    # Garante tuplas (x, y)
+    p1 = _get_xy(p1)
+    p2 = _get_xy(p2)
+    p3 = _get_xy(p3)
+    p4 = _get_xy(p4)
+
+    # Verifica interseção completa (ambos os segmentos devem se cruzar)
+    return ccw(p1, p3, p4) != ccw(p2, p3, p4) and ccw(p1, p2, p3) != ccw(p1, p2, p4)
+
+def get_side_of_segment(point, p_start, p_end):
+    """
+    Retorna 'right' ou 'left' do ponto em relação ao vetor (p_start -> p_end).
+    """
+    x, y = _get_xy(point)
+    x1, y1 = _get_xy(p_start)
+    x2, y2 = _get_xy(p_end)
+    
+    # Produto cruzado (Cross Product)
+    # (x2-x1)*(y-y1) - (y2-y1)*(x-x1)
+    cross = (x2 - x1) * (y - y1) - (y2 - y1) * (x - x1)
+    
+    if cross > 0: return 'right'
+    else: return 'left'
+
+def segments_intersect(p1, p2, p3, p4):
+    """
+    Verifica se o segmento (p1->p2) cruza o segmento (p3->p4).
+    Retorna True se houver interseção.
+    """
+    def ccw(A, B, C):
+        Ax, Ay = _get_xy(A)
+        Bx, By = _get_xy(B)
+        Cx, Cy = _get_xy(C)
+        return (Cy-Ay) * (Bx-Ax) > (By-Ay) * (Cx-Ax)
+
+    # Verifica se os pontos p1 e p2 estão em lados opostos da linha p3-p4
+    # E se p3 e p4 estão em lados opostos da linha p1-p2
+    return ccw(p1, p3, p4) != ccw(p2, p3, p4) and ccw(p1, p2, p3) != ccw(p1, p2, p4)

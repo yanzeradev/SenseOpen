@@ -19,20 +19,42 @@ monitor_queues = {}
 active_tasks = {}
 stop_signals = {} 
 
+async def restart_camera(device_id):
+    """
+    Força a parada de uma câmera. 
+    O Scheduler (Self-Healing) detectará que ela parou e a reiniciará automaticamente 
+    no próximo ciclo (dentro de ~10s) com as novas configurações do banco.
+    """
+    if device_id in stop_signals:
+        print(f"🔄 Reiniciando Câmera {device_id} para aplicar novas configurações...")
+        stop_signals[device_id].set()
+        
+        if device_id in active_tasks:
+            try:
+                # Aguarda brevemente para garantir que o loop anterior encerre
+                await asyncio.wait_for(active_tasks[device_id], timeout=2.0)
+            except: pass
+            del active_tasks[device_id]
+        
+        if device_id in stop_signals: del stop_signals[device_id]
+        if device_id in monitor_queues: del monitor_queues[device_id]
+
 def get_stream_resolution(rtsp_url):
     try:
         cmd = ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", rtsp_url]
         output = subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode().strip()
         if output:
-            w, h = map(int, output.split(','))
-            return w, h
+            parts = output.split(',')
+            if len(parts) >= 2:
+                w, h = int(parts[0]), int(parts[1])
+                if w > 0 and h > 0: return w, h
     except: pass
     try:
         cap = cv2.VideoCapture(rtsp_url)
         if cap.isOpened():
             w, h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             cap.release()
-            return w, h
+            if w > 0 and h > 0: return w, h
     except: pass
     return 1920, 1080
 
@@ -98,7 +120,7 @@ async def scheduler_loop(processor_ref):
             print(f"❌ Erro Crítico no Scheduler: {e}")
             traceback.print_exc()
         
-        await asyncio.sleep(10)
+        await asyncio.sleep(3)
 
 def draw_visuals(frame, tracks, line_ent, line_pass, counts, fps):
     # Desenha Linhas
@@ -147,15 +169,34 @@ async def run_live_camera_ffmpeg(device_id, rtsp_url, lines_config, stop_event, 
 
         local_rtsp = f"rtsp://sense_go2rtc:8554/{stream_name}"
         
-        # Inicializa DB
+        # 1. Recupera Contagem Anterior (Persistência)
+        last_results = crud.get_latest_live_results(db, device_id)
+        
         initial_stats = {"total_geral": {"Total": 0}, "entrantes": {"Person": 0, "Total": 0}, "passantes": {"Person": 0, "Total": 0}}
+        
+        if last_results:
+            print(f"♻️ Restaurando histórico da Câmera {device_id}: {last_results['total_geral']}")
+            # Copia os dados anteriores para iniciar deste ponto
+            initial_stats = last_results
+
+        # Inicializa DB com os dados recuperados ou zerados
         crud.create_user_video(db, 0, video_id, rtsp_url, "")
         crud.update_video_after_processing(db, video_id, None, None, initial_stats, "live_processing")
+
+        # Inicializa variáveis de contagem com os valores iniciais
+        counts = {
+            "entrantes": initial_stats.get("entrantes", {"Person": 0, "Total": 0}),
+            "passantes": initial_stats.get("passantes", {"Person": 0, "Total": 0})
+        }
 
         WIDTH, HEIGHT = get_stream_resolution(local_rtsp)
         FRAME_SIZE = WIDTH * HEIGHT * 3 
 
-        print(f"🔌 Iniciando Processamento Visual: {local_rtsp}")
+        print(f"🔌 Iniciando Processamento Visual: {local_rtsp} ({WIDTH}x{HEIGHT})")
+        
+        if WIDTH == 0 or HEIGHT == 0:
+            print("❌ Resolução inválida (0x0). Tentando novamente em breve...")
+            return
 
         command = ['ffmpeg', '-rtsp_transport', 'tcp', '-i', local_rtsp, '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-r', '15', '-an', '-sn', '-y', '-']
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=10**8)
@@ -186,20 +227,27 @@ async def run_live_camera_ffmpeg(device_id, rtsp_url, lines_config, stop_event, 
         last_save = time.time()
         
         while not stop_event.is_set():
-            raw_frame = process.stdout.read(FRAME_SIZE)
+            try:
+                raw_frame = await asyncio.to_thread(process.stdout.read, FRAME_SIZE)
+            except ValueError:
+                break # Pipe fechado
             
             if len(raw_frame) != FRAME_SIZE:
                 print(f"⚠️ Frame incompleto dev {device_id}. Reiniciando pipe...")
-                # Recalcula dimensões antes de reiniciar para garantir que não mudaram
-                WIDTH, HEIGHT = get_stream_resolution(local_rtsp)
-                FRAME_SIZE = WIDTH * HEIGHT * 3
+                # Reduzido tempo de espera na falha de leitura
                 process.terminate()
-                await asyncio.sleep(2)
+                await asyncio.sleep(0.5)
                 process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=10**8)
                 continue
 
-            # --- AQUI ESTAVA O ERRO: Adicionamos .copy() para tornar a array gravável (writable) ---
-            frame = np.frombuffer(raw_frame, np.uint8).reshape((HEIGHT, WIDTH, 3)).copy()
+            # Frame bufferizado -> Numpy
+            try:
+                frame = np.frombuffer(raw_frame, np.uint8).reshape((HEIGHT, WIDTH, 3)).copy()
+            except Exception:
+                continue
+
+            # PROTEÇÃO: Se frame estiver vazio
+            if frame.size == 0: continue
 
             frame_count += 1
             if time.time() - t0 > 1:
@@ -207,9 +255,13 @@ async def run_live_camera_ffmpeg(device_id, rtsp_url, lines_config, stop_event, 
                 frame_count = 0
                 t0 = time.time()
 
-            # IA Processing
+            # IA Processing (já roda em thread via to_thread dentro do scheduler, mas aqui chamamos direto)
+            # Como estamos dentro de uma task async, o ideal é manter o processamento pesado também off-loaded se possível
+            # Mas como `processor.process_frame` é CPU-bound, o ideal é:
             processor = processor_ref.get("processor")
             if not processor: break
+            
+            # Offload do processamento da IA para não bloquear o loop enquanto calcula
             tracks = await asyncio.to_thread(processor.process_frame, frame)
 
             # --- LÓGICA DE CONTAGEM ---
@@ -219,33 +271,54 @@ async def run_live_camera_ffmpeg(device_id, rtsp_url, lines_config, stop_event, 
                 ref_point = (int((bbox[0]+bbox[2])/2), int((bbox[1]+bbox[3])/2))
 
                 if tid not in track_states:
-                    track_states[tid] = {'status': 'neutral', 'last_ent_side': 'unknown', 'last_pass_side': 'unknown'}
-                state = track_states[tid]
+                    track_states[tid] = {
+                        'status': 'neutral', 
+                        'last_point': ref_point
+                    }
                 
-                # Passante
-                curr_pass = geometry.get_point_side(ref_point, line_pass)
-                if curr_pass != 'on_line' and state['last_pass_side'] != 'unknown' and state['last_pass_side'] != curr_pass:
-                    if state['status'] == 'neutral':
-                        state['status'] = 'passerby'
-                        counts['passantes']['Person'] += 1
-                        counts['passantes']['Total'] += 1
-                state['last_pass_side'] = curr_pass
+                state = track_states[tid]
+                prev_point = state.get('last_point', ref_point)
 
-                # Entrante
-                curr_ent = geometry.get_point_side(ref_point, line_ent)
-                entrant_out = 'left' if in_side == 'right' else 'right'
-                if curr_ent != 'on_line' and state['last_ent_side'] == entrant_out and curr_ent == in_side:
-                    if state['status'] == 'neutral':
-                        state['status'] = 'entrant'
-                        counts['entrantes']['Person'] += 1
-                        counts['entrantes']['Total'] += 1
-                    elif state['status'] == 'passerby':
-                        state['status'] = 'entrant'
-                        counts['passantes']['Person'] -= 1
-                        counts['passantes']['Total'] -= 1
-                        counts['entrantes']['Person'] += 1
-                        counts['entrantes']['Total'] += 1
-                state['last_ent_side'] = curr_ent
+                # Só processa se houve deslocamento
+                if prev_point != ref_point:
+                    
+                    # 1. VERIFICAÇÃO PASSANTES (Qualquer sentido)
+                    crossed_pass = False
+                    for i in range(len(line_pass) - 1):
+                        if geometry.segments_intersect(prev_point, ref_point, line_pass[i], line_pass[i+1]):
+                            crossed_pass = True
+                            break
+                    
+                    if crossed_pass:
+                        if state['status'] == 'neutral':
+                            state['status'] = 'passerby'
+                            counts['passantes']['Person'] += 1
+                            counts['passantes']['Total'] += 1
+
+                    # 2. VERIFICAÇÃO ENTRANTES (Sentido OUT -> IN)
+                    for i in range(len(line_ent) - 1):
+                        p_start = line_ent[i]
+                        p_end = line_ent[i+1]
+                        
+                        if geometry.segments_intersect(prev_point, ref_point, p_start, p_end):
+                            side_prev = geometry.get_side_of_segment(prev_point, p_start, p_end)
+                            required_prev_side = 'left' if in_side == 'right' else 'right'
+
+                            if side_prev == required_prev_side:
+                                if state['status'] == 'neutral':
+                                    state['status'] = 'entrant'
+                                    counts['entrantes']['Person'] += 1
+                                    counts['entrantes']['Total'] += 1
+                                    
+                                elif state['status'] == 'passerby':
+                                    state['status'] = 'entrant'
+                                    counts['passantes']['Person'] -= 1
+                                    counts['passantes']['Total'] -= 1
+                                    counts['entrantes']['Person'] += 1
+                                    counts['entrantes']['Total'] += 1
+                                break 
+
+                state['last_point'] = ref_point
 
             # --- DESENHO E STREAMING ---
             processed_frame = draw_visuals(frame, tracks, line_ent, line_pass, counts, fps)
@@ -260,15 +333,16 @@ async def run_live_camera_ffmpeg(device_id, rtsp_url, lines_config, stop_event, 
                 if ret:
                     await q.put(buffer.tobytes())
 
-            # DB Save
+            # DB Save - Otimizado com Context Manager para evitar Connection Leaks
             if time.time() - last_save > 2:
                 total = {"Total": counts['entrantes']['Total'] + counts['passantes']['Total']}
                 res = {"total_geral": total, "entrantes": counts['entrantes'], "passantes": counts['passantes']}
                 try:
-                    db_save = SessionLocal()
-                    crud.update_video_after_processing(db_save, video_id, None, None, res, "live_processing")
-                    db_save.close()
-                except: pass
+                    # Uso correto de context manager garante o fechamento da sessão mesmo com erro
+                    with SessionLocal() as db_save:
+                        crud.update_video_after_processing(db_save, video_id, None, None, res, "live_processing")
+                except Exception as e:
+                    print(f"Erro ao salvar stats live (ignorado): {e}")
                 last_save = time.time()
             
             await asyncio.sleep(0.001)

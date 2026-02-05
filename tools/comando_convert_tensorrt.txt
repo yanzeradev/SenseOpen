@@ -1,0 +1,1 @@
+docker exec -it sense_backend yolo export model=/app/backend/sense/model_coco_crowd.pt format=engine device=0 half=True simplify=True workspace=4
