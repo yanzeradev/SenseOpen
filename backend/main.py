@@ -166,76 +166,159 @@ async def run_video_processing(video_id: str, line_ent_raw: list, line_pass_raw:
         for t in tracks:
             tid = t["track_id"]; bbox = t["bbox"]; cls = t["class_id"]
             
+            # --- PONTO DE REFERÊNCIA: CENTRO DO BBOX ---
+            ref_point = (int((bbox[0]+bbox[2])/2), int((bbox[1]+bbox[3])/2))
+
             # Inicializa estado se novo ID
             if tid not in track_states:
                 track_states[tid] = {
                     'status': 'neutral', 
-                    'last_ent_side': 'unknown',
-                    'last_pass_side': 'unknown' # Rastreia lado da linha de passantes
+                    'last_point': ref_point
                 }
                 track_classes[tid] = []
             
             track_classes[tid].append(cls)
             state = track_states[tid]
             
-            # --- PONTO DE REFERÊNCIA: CENTRO DO BBOX ---
-            # Antes: Pé ((x1+x2)/2, y2)
-            # Agora: Centro ((x1+x2)/2, (y1+y2)/2)
-            ref_point = (int((bbox[0]+bbox[2])/2), int((bbox[1]+bbox[3])/2))
+            # --- PROTEÇÃO CONTRA KEYERROR ---
+            # Se por algum motivo o estado veio antigo (sem last_point), usa o atual para não quebrar
+            prev_point = state.get('last_point', ref_point)
 
-            # Desenha o ponto de referência para debug visual
-            cv2.circle(frame, ref_point, 4, (0, 0, 255), -1)
+            # Só processa se houve deslocamento real
+            if prev_point != ref_point:
 
-            # -----------------------------------------------------------
-            # 1. Checa Passante (Lógica: Cruzamento de Linha)
-            # -----------------------------------------------------------
-            curr_pass_side = geometry.get_point_side(ref_point, line_pass)
+                # -----------------------------------------------------------
+                # 1. Checa Passante (Lógica: Cruzamento de Segmento - Bidirecional)
+                # -----------------------------------------------------------
+                crossed_pass = False
+                for i in range(len(line_pass) - 1):
+                    # Verifica se o movimento cortou algum segmento da linha desenhada
+                    if geometry.segments_intersect(prev_point, ref_point, line_pass[i], line_pass[i+1]):
+                        crossed_pass = True
+                        break
 
-            if curr_pass_side != 'on_line':
-                last_pass_side = state['last_pass_side']
-                
-                # Se mudou de lado (e o lado anterior era conhecido)
-                if last_pass_side != 'unknown' and last_pass_side != curr_pass_side:
-                    
-                    # Só conta se ainda for neutro (prioridade para entrante se necessário, ou independente)
-                    # Aqui assumo que se virou passante, conta.
+                if crossed_pass:
                     if state['status'] == 'neutral':
                         state['status'] = 'passerby'
                         count_passerby += 1
+                        # Feedback Visual
                         cv2.rectangle(frame, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), (0, 255, 255), 4)
-                        # Opcional: Feedback visual de "Cruzou Passante"
 
-                # Atualiza o último lado conhecido
-                state['last_pass_side'] = curr_pass_side
-
-            # -----------------------------------------------------------
-            # 2. Checa Entrante (Lógica: Cruzamento OUT -> IN)
-            # -----------------------------------------------------------
-            curr_ent_side = geometry.get_point_side(ref_point, line_ent)
-            
-            if curr_ent_side != 'on_line':
-                last_ent_side = state['last_ent_side']
-                
-                # Detecta cruzamento válido (Entrada)
-                if last_ent_side == entrant_out_side and curr_ent_side == in_side:
+                # -----------------------------------------------------------
+                # 2. Checa Entrante (Lógica: Cruzamento + Direção OUT->IN)
+                # -----------------------------------------------------------
+                for i in range(len(line_ent) - 1):
+                    p_start = line_ent[i]
+                    p_end = line_ent[i+1]
                     
-                    if state['status'] == 'neutral':
-                        state['status'] = 'entrant'
-                        count_entrant += 1
-                        cv2.circle(frame, ref_point, 20, (0, 255, 0), -1)
+                    # Se cruzou o segmento físico da linha de entrada
+                    if geometry.segments_intersect(prev_point, ref_point, p_start, p_end):
                         
-                    elif state['status'] == 'passerby':
-                        # Reclassificação: Era passante, mas entrou na loja
-                        state['status'] = 'entrant'
-                        count_passerby -= 1 # Remove dos passantes
-                        count_entrant += 1  # Adiciona nos entrantes
-                        cv2.circle(frame, ref_point, 20, (0, 255, 0), -1)
-                        cv2.putText(frame, "TROCOU!", (int(bbox[0]), int(bbox[1]-20)), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 2)
+                        # Verifica Direção: Ponto anterior deve estar do lado 'OUT'
+                        side_prev = geometry.get_side_of_segment(prev_point, p_start, p_end)
+                        required_prev_side = 'left' if in_side == 'right' else 'right'
 
-                # Atualiza o último lado conhecido
-                state['last_ent_side'] = curr_ent_side
+                        if side_prev == required_prev_side:
+                            # Confirmação de Entrada
+                            if state['status'] == 'neutral':
+                                state['status'] = 'entrant'
+                                count_entrant += 1
+                                cv2.circle(frame, ref_point, 20, (0, 255, 0), -1)
+                                
+                            elif state['status'] == 'passerby':
+                                # Correção: Era passante, mas decidiu entrar
+                                state['status'] = 'entrant'
+                                count_passerby -= 1 # Remove da contagem de passantes
+                                count_entrant += 1  # Adiciona na contagem de entrantes
+                                cv2.circle(frame, ref_point, 20, (0, 255, 0), -1)
+                                cv2.putText(frame, "TROCOU!", (int(bbox[0]), int(bbox[1]-20)), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 2)
+                            
+                            break # Já contou, sai do loop de segmentos
 
+            # Atualiza o último ponto conhecido
+            state['last_point'] = ref_point
+
+        # Desenha as caixas e IDs primeiro (para a bolinha ficar por cima depois)
         annotated = processor.draw_tracks(frame, tracks)
+
+        for t in tracks:
+            tid = t["track_id"]; bbox = t["bbox"]; cls = t["class_id"]
+            
+            # --- PONTO DE REFERÊNCIA: CENTRO DO BBOX ---
+            ref_point = (int((bbox[0]+bbox[2])/2), int((bbox[1]+bbox[3])/2))
+            
+            # Desenha a "Bolinha Vermelha" garantida na imagem de saída
+            cv2.circle(annotated, ref_point, 5, (0, 0, 255), -1)
+
+            # Inicializa estado se novo ID
+            if tid not in track_states:
+                track_states[tid] = {
+                    'status': 'neutral', 
+                    'last_point': ref_point
+                }
+                track_classes[tid] = []
+            
+            track_classes[tid].append(cls)
+            state = track_states[tid]
+            
+            # Proteção: Pega ponto anterior ou usa o atual se não existir
+            prev_point = state.get('last_point', ref_point)
+
+            # Só processa lógica se houve movimento
+            if prev_point != ref_point:
+
+                # -----------------------------------------------------------
+                # 1. LÓGICA PASSANTES (Qualquer Sentido)
+                # -----------------------------------------------------------
+                crossed_pass = False
+                for i in range(len(line_pass) - 1):
+                    # Verifica interseção vetorial (independente de lado)
+                    if geometry.segments_intersect(prev_point, ref_point, line_pass[i], line_pass[i+1]):
+                        crossed_pass = True
+                        break
+                
+                if crossed_pass:
+                    # Se era neutro, vira passante
+                    if state['status'] == 'neutral':
+                        state['status'] = 'passerby'
+                        count_passerby += 1
+                        # Feedback Visual Amarelo
+                        cv2.rectangle(annotated, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), (0, 255, 255), 4)
+
+                # -----------------------------------------------------------
+                # 2. LÓGICA ENTRANTES (Sentido Obrigatório OUT -> IN)
+                # -----------------------------------------------------------
+                for i in range(len(line_ent) - 1):
+                    p_start = line_ent[i]
+                    p_end = line_ent[i+1]
+                    
+                    # Verifica se cruzou fisicamente a linha
+                    if geometry.segments_intersect(prev_point, ref_point, p_start, p_end):
+                        
+                        # Verifica Direção: Deve vir do lado de FORA
+                        # Se in_side='right', o lado de fora é 'left'
+                        side_prev = geometry.get_side_of_segment(prev_point, p_start, p_end)
+                        required_prev_side = 'left' if in_side == 'right' else 'right'
+
+                        if side_prev == required_prev_side:
+                            # Caso 1: Era Neutro -> Virou Entrante
+                            if state['status'] == 'neutral':
+                                state['status'] = 'entrant'
+                                count_entrant += 1
+                                cv2.circle(annotated, ref_point, 15, (0, 255, 0), -1)
+                                
+                            # Caso 2: Era Passante -> Virou Entrante (CORREÇÃO DE CONTAGEM)
+                            elif state['status'] == 'passerby':
+                                state['status'] = 'entrant'
+                                count_passerby -= 1 # Remove do passante
+                                count_entrant += 1  # Adiciona no entrante
+                                cv2.circle(annotated, ref_point, 15, (0, 255, 0), -1)
+                                cv2.putText(annotated, "ENTROU!", (int(bbox[0]), int(bbox[1]-30)), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,0), 2)
+                            
+                            break # Já contou entrada, sai do loop de segmentos
+
+            # Atualiza ponto anterior
+            state['last_point'] = ref_point
         
         # Desenha placar no vídeo (Sem "Na Loja")
         cv2.putText(annotated, f"Entrantes: {count_entrant}", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
@@ -336,23 +419,13 @@ async def monitor_stream(device_id: int):
     return StreamingResponse(frame_generator(), media_type="multipart/x-mixed-replace; boundary=frame")
     
 @app.post("/upload-video/")
-def upload_video(video_file: UploadFile = File(...), db: Session = Depends(get_db)):
-    """
-    NOTA DO ESPECIALISTA: Removido 'async' para evitar bloqueio do Event Loop.
-    O FastAPI executará esta função síncrona (IO-bound) em uma thread separada (threadpool),
-    permitindo que o servidor continue respondendo a outras requisições enquanto o arquivo é copiado.
-    """
+async def upload_video(video_file: UploadFile = File(...), db: Session = Depends(get_db)):
     vid_id = str(uuid.uuid4())
     v_path = os.path.join(config.UPLOAD_DIR, f"{vid_id}.mp4")
     f_path = os.path.join(config.FRAMES_DIR, f"{vid_id}_frame.jpg")
-    
-    # Operação bloqueante (IO de disco) segura agora que estamos em uma thread
-    with open(v_path, "wb") as b: 
-        shutil.copyfileobj(video_file.file, b)
-        
+    with open(v_path, "wb") as b: shutil.copyfileobj(video_file.file, b)
     cap = cv2.VideoCapture(v_path); ret, frame = cap.read(); cap.release()
     if ret: cv2.imwrite(f_path, frame)
-    
     # Passamos 0 como user_id (ignorado pelo CRUD no modelo novo)
     crud.create_user_video(db, 0, vid_id, v_path, f_path)
     return {"video_id": vid_id, "first_frame_url": f"/static/frames/{vid_id}_frame.jpg"}
