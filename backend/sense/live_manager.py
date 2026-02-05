@@ -186,7 +186,10 @@ async def run_live_camera_ffmpeg(device_id, rtsp_url, lines_config, stop_event, 
         last_save = time.time()
         
         while not stop_event.is_set():
-            raw_frame = process.stdout.read(FRAME_SIZE)
+            try:
+                raw_frame = await asyncio.to_thread(process.stdout.read, FRAME_SIZE)
+            except ValueError:
+                break # Pipe fechado
             
             if len(raw_frame) != FRAME_SIZE:
                 print(f"⚠️ Frame incompleto dev {device_id}. Reiniciando pipe...")
@@ -195,7 +198,7 @@ async def run_live_camera_ffmpeg(device_id, rtsp_url, lines_config, stop_event, 
                 process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=10**8)
                 continue
 
-            # --- AQUI ESTAVA O ERRO: Adicionamos .copy() para tornar a array gravável (writable) ---
+            # Frame bufferizado -> Numpy
             frame = np.frombuffer(raw_frame, np.uint8).reshape((HEIGHT, WIDTH, 3)).copy()
 
             frame_count += 1
@@ -204,45 +207,82 @@ async def run_live_camera_ffmpeg(device_id, rtsp_url, lines_config, stop_event, 
                 frame_count = 0
                 t0 = time.time()
 
-            # IA Processing
+            # IA Processing (já roda em thread via to_thread dentro do scheduler, mas aqui chamamos direto)
+            # Como estamos dentro de uma task async, o ideal é manter o processamento pesado também off-loaded se possível
+            # Mas como `processor.process_frame` é CPU-bound, o ideal é:
             processor = processor_ref.get("processor")
             if not processor: break
+            
+            # Offload do processamento da IA para não bloquear o loop enquanto calcula
             tracks = await asyncio.to_thread(processor.process_frame, frame)
 
             # --- LÓGICA DE CONTAGEM ---
             for t in tracks:
                 tid = t["track_id"]
                 bbox = t["bbox"]
+                # Ponto de Referência: Centro do BBox (Bolinha Vermelha)
                 ref_point = (int((bbox[0]+bbox[2])/2), int((bbox[1]+bbox[3])/2))
 
                 if tid not in track_states:
-                    track_states[tid] = {'status': 'neutral', 'last_ent_side': 'unknown', 'last_pass_side': 'unknown'}
-                state = track_states[tid]
+                    track_states[tid] = {
+                        'status': 'neutral',  # neutral -> passerby -> entrant
+                        'last_point': ref_point
+                    }
                 
-                # Passante
-                curr_pass = geometry.get_point_side(ref_point, line_pass)
-                if curr_pass != 'on_line' and state['last_pass_side'] != 'unknown' and state['last_pass_side'] != curr_pass:
-                    if state['status'] == 'neutral':
-                        state['status'] = 'passerby'
-                        counts['passantes']['Person'] += 1
-                        counts['passantes']['Total'] += 1
-                state['last_pass_side'] = curr_pass
+                state = track_states[tid]
+                prev_point = state['last_point']
 
-                # Entrante
-                curr_ent = geometry.get_point_side(ref_point, line_ent)
-                entrant_out = 'left' if in_side == 'right' else 'right'
-                if curr_ent != 'on_line' and state['last_ent_side'] == entrant_out and curr_ent == in_side:
-                    if state['status'] == 'neutral':
-                        state['status'] = 'entrant'
-                        counts['entrantes']['Person'] += 1
-                        counts['entrantes']['Total'] += 1
-                    elif state['status'] == 'passerby':
-                        state['status'] = 'entrant'
-                        counts['passantes']['Person'] -= 1
-                        counts['passantes']['Total'] -= 1
-                        counts['entrantes']['Person'] += 1
-                        counts['entrantes']['Total'] += 1
-                state['last_ent_side'] = curr_ent
+                # Só processa se houve deslocamento
+                if prev_point != ref_point:
+                    
+                    # 1. VERIFICAÇÃO PASSANTES (Qualquer sentido)
+                    # Se cruzar qualquer segmento da linha de passantes, conta.
+                    crossed_pass = False
+                    for i in range(len(line_pass) - 1):
+                        if geometry.segments_intersect(prev_point, ref_point, line_pass[i], line_pass[i+1]):
+                            crossed_pass = True
+                            break
+                    
+                    if crossed_pass:
+                        # Se ainda não foi contado como passante (e não é entrante ainda)
+                        if state['status'] == 'neutral':
+                            state['status'] = 'passerby'
+                            counts['passantes']['Person'] += 1
+                            counts['passantes']['Total'] += 1
+
+                    # 2. VERIFICAÇÃO ENTRANTES (Sentido OUT -> IN)
+                    # Verifica se cruzou algum segmento da linha de entrada
+                    for i in range(len(line_ent) - 1):
+                        p_start = line_ent[i]
+                        p_end = line_ent[i+1]
+                        
+                        if geometry.segments_intersect(prev_point, ref_point, p_start, p_end):
+                            # Cruzou a linha física. Agora validamos a direção.
+                            # Para ser entrante, o ponto ANTERIOR deve estar no lado 'OUT'.
+                            # Se in_side='right', então out_side='left'.
+                            
+                            side_prev = geometry.get_side_of_segment(prev_point, p_start, p_end)
+                            required_prev_side = 'left' if in_side == 'right' else 'right'
+
+                            if side_prev == required_prev_side:
+                                # Transição de Estado
+                                if state['status'] == 'neutral':
+                                    state['status'] = 'entrant'
+                                    counts['entrantes']['Person'] += 1
+                                    counts['entrantes']['Total'] += 1
+                                    
+                                elif state['status'] == 'passerby':
+                                    # Correção da Dupla Contagem:
+                                    # Se ele já era passante, removemos dele e jogamos para entrante
+                                    state['status'] = 'entrant'
+                                    counts['passantes']['Person'] -= 1
+                                    counts['passantes']['Total'] -= 1
+                                    counts['entrantes']['Person'] += 1
+                                    counts['entrantes']['Total'] += 1
+                                break # Já contou, sai do loop de segmentos
+
+                # Atualiza ponto anterior para o próximo frame
+                state['last_point'] = ref_point
 
             # --- DESENHO E STREAMING ---
             processed_frame = draw_visuals(frame, tracks, line_ent, line_pass, counts, fps)
@@ -257,15 +297,16 @@ async def run_live_camera_ffmpeg(device_id, rtsp_url, lines_config, stop_event, 
                 if ret:
                     await q.put(buffer.tobytes())
 
-            # DB Save
+            # DB Save - Otimizado com Context Manager para evitar Connection Leaks
             if time.time() - last_save > 2:
                 total = {"Total": counts['entrantes']['Total'] + counts['passantes']['Total']}
                 res = {"total_geral": total, "entrantes": counts['entrantes'], "passantes": counts['passantes']}
                 try:
-                    db_save = SessionLocal()
-                    crud.update_video_after_processing(db_save, video_id, None, None, res, "live_processing")
-                    db_save.close()
-                except: pass
+                    # Uso correto de context manager garante o fechamento da sessão mesmo com erro
+                    with SessionLocal() as db_save:
+                        crud.update_video_after_processing(db_save, video_id, None, None, res, "live_processing")
+                except Exception as e:
+                    print(f"Erro ao salvar stats live (ignorado): {e}")
                 last_save = time.time()
             
             await asyncio.sleep(0.001)

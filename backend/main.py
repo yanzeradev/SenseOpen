@@ -336,13 +336,23 @@ async def monitor_stream(device_id: int):
     return StreamingResponse(frame_generator(), media_type="multipart/x-mixed-replace; boundary=frame")
     
 @app.post("/upload-video/")
-async def upload_video(video_file: UploadFile = File(...), db: Session = Depends(get_db)):
+def upload_video(video_file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """
+    NOTA DO ESPECIALISTA: Removido 'async' para evitar bloqueio do Event Loop.
+    O FastAPI executará esta função síncrona (IO-bound) em uma thread separada (threadpool),
+    permitindo que o servidor continue respondendo a outras requisições enquanto o arquivo é copiado.
+    """
     vid_id = str(uuid.uuid4())
     v_path = os.path.join(config.UPLOAD_DIR, f"{vid_id}.mp4")
     f_path = os.path.join(config.FRAMES_DIR, f"{vid_id}_frame.jpg")
-    with open(v_path, "wb") as b: shutil.copyfileobj(video_file.file, b)
+    
+    # Operação bloqueante (IO de disco) segura agora que estamos em uma thread
+    with open(v_path, "wb") as b: 
+        shutil.copyfileobj(video_file.file, b)
+        
     cap = cv2.VideoCapture(v_path); ret, frame = cap.read(); cap.release()
     if ret: cv2.imwrite(f_path, frame)
+    
     # Passamos 0 como user_id (ignorado pelo CRUD no modelo novo)
     crud.create_user_video(db, 0, vid_id, v_path, f_path)
     return {"video_id": vid_id, "first_frame_url": f"/static/frames/{vid_id}_frame.jpg"}
